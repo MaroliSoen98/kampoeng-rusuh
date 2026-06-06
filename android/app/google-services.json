@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "1069755549925",
+    "firebase_url": "https://kampoeng-rusuh-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "kampoeng-rusuh",
+    "storage_bucket": "kampoeng-rusuh.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1069755549925:android:542858a6923df649466c0c",
+        "android_client_info": {
+          "package_name": "com.example.kampoeng_rusuh"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAwcY6jmSgYgZSJQqiLLDg1s8x_G0mtLc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
