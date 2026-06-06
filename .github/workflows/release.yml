@@ -2,8 +2,8 @@ name: Flutter Android Release
 
 on:
   push:
-    tags:
-      - 'v*' # Workflow ini akan berjalan HANYA jika kamu mem-push tag berawalan 'v' (contoh: v1.0.0)
+    branches:
+      - main # Workflow akan otomatis berjalan setiap kali kamu melakukan git push ke branch main
 
 permissions:
   contents: write # Diperlukan agar GitHub Action punya izin membuat halaman Release
@@ -35,10 +35,13 @@ jobs:
         run: flutter build apk --release
 
       - name: Rename APK
-        run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Kampoeng Rusuh ${{ github.ref_name }}.apk"
+        # Menggunakan github.run_number agar nama file unik setiap kali push (contoh: Build-1, Build-2)
+        run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Kampoeng Rusuh Build-${{ github.run_number }}.apk"
 
       - name: Create GitHub Release & Upload APK
         uses: softprops/action-gh-release@v1
         with:
-          files: "build/app/outputs/flutter-apk/Kampoeng Rusuh ${{ github.ref_name }}.apk"
+          tag_name: "build-${{ github.run_number }}"
+          name: "Auto Release Build #${{ github.run_number }}"
+          files: "build/app/outputs/flutter-apk/Kampoeng Rusuh Build-${{ github.run_number }}.apk"
           generate_release_notes: true
