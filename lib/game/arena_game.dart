@@ -257,6 +257,7 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
                 if (respawning && !p.isRespawning) {
                   p.isRespawning = true;
                   p.position = Vector2(-100, -100);
+                  p.velocity = Vector2.zero();
                 } else if (!respawning && p.isRespawning) {
                   p.isRespawning = false;
                 }

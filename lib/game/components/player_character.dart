@@ -46,6 +46,9 @@ class PlayerCharacter extends PositionComponent
   double hitstopTimer = 0.0;
   double punchTimer = 0.0;
   double grabCooldownTimer = 0.0;
+
+  int comboCount = 0;
+  double comboResetTimer = 0.0;
   String? grabbedByLabel;
   Vector2? targetNetworkPosition;
 
@@ -279,6 +282,13 @@ class PlayerCharacter extends PositionComponent
       return; // Freeze seluruh karakter (animasi, gerakan fisika, dan status) saat Hitstop aktif
     }
 
+    if (comboResetTimer > 0) {
+      comboResetTimer -= dt;
+      if (comboResetTimer <= 0) {
+        comboCount = 0;
+      }
+    }
+
     if (animationTickers != null) {
       if (!isRemotePlayer) {
         _updateAnimationState(); // Remote player di-update otomatis dari sinkronisasi database
@@ -314,14 +324,21 @@ class PlayerCharacter extends PositionComponent
     }
 
     if (isRespawning) {
+      // Kunci posisi dan kecepatan terus-menerus untuk mencegah bug flicker dead-reckoning
+      position = Vector2(-100, -100);
+      velocity = Vector2.zero();
+
       if (grabbedCharacter != null) {
         grabbedCharacter!.isGrabbed = false;
         grabbedCharacter = null;
       }
-      respawnTimer -= dt;
-      if (respawnTimer <= 0) {
-        isRespawning = false;
-        gameRef.spawnManager.respawnPlayer(this);
+      if (!isRemotePlayer) {
+        // Hanya lokal/bot yang menghitung timer dan memicu respawn sendiri
+        respawnTimer -= dt;
+        if (respawnTimer <= 0) {
+          isRespawning = false;
+          gameRef.spawnManager.respawnPlayer(this);
+        }
       }
       return;
     }
@@ -523,6 +540,8 @@ class PlayerCharacter extends PositionComponent
     if (_wantsToPunch && grabbedCharacter == null && punchTimer <= 0) {
       punchTimer = 0.42; // Durasi animasi pukulan (7 frame * 0.06 detik)
 
+      bool hitSomeone = false;
+
       // Buat Hitbox Pukulan (Tonjokan) yang terarah ke depan
       final double punchWidth = 55.0; // Jarak rentangan tonjokan (diperlebar)
       final double punchHeight = 40.0;
@@ -550,32 +569,58 @@ class PlayerCharacter extends PositionComponent
 
           // Cek tabrakan hitbox tinju dengan badan musuh DAN dipastikan berhadapan
           if (isFacingTarget && punchRect.overlaps(other.toRect())) {
+            hitSomeone = true;
+            int currentHit = comboCount + 1;
+            double damageToAdd;
+            double baseVx;
+            double baseVy;
+            double stunTime;
+            double hitstopTime;
+            double shakeInt;
+            double
+            appliedMultiplier; // Tambahkan variabel pengontrol multiplier
+
+            if (currentHit < 3) {
+              // PUKULAN JAB 1 & 2: RAHASIA SMASH BROS (Set Knockback)
+              // Jarak mundur selalu konsisten, tidak peduli % damage musuh, agar combo selalu nyambung!
+              damageToAdd = 2.0 + (Random().nextDouble() * 1.5);
+              baseVx = 35.0; // Pushback pendek dan konstan
+              baseVy = 0.0; // Tetap berpijak di tanah
+              stunTime = 0.5; // Stun pas agar kita bisa lanjut pukul
+              hitstopTime = 0.05;
+              shakeInt = 1.0;
+              appliedMultiplier =
+                  1.0; // <- RAHASIA: Tidak dikalikan damage % musuh!
+            } else {
+              // FINISHER JAB 3: SMASH ATTACK (Scaling Knockback)
+              // Musuh terlempar melayang ke udara sesuai % damage mereka!
+              damageToAdd = 7.0 + (Random().nextDouble() * 3.0);
+              baseVx = 160.0; // Momentum horizontal lemparan
+              baseVy = 130.0; // Momentum vertikal (Di-launching ke udara)
+              stunTime = 0.8;
+              hitstopTime = 0.18; // Freeze frame JEDARR yang lebih lama!
+              shakeInt = 10.0; // Getaran layar lebih epik
+              // <- RAHASIA: Baru di hit ke-3 multiplier damage berlaku!
+              appliedMultiplier =
+                  (1.0 + ((other.damagePercentage + damageToAdd) / 50.0)) *
+                  rageMultiplier;
+            }
+
             // Tambah persentase damage dengan variasi desimal
-            double damageToAdd =
-                6.5 +
-                (Random().nextDouble() * 2.5); // Acak sekitar 6.5% hingga 9.0%
             other.damagePercentage += damageToAdd;
             other.updateDamageUI();
 
-            // Hitung multiplier berdasarkan damage TARGET (Makin besar persentase musuh, knockbacknya makin gila)
-            double knockbackMultiplier =
-                (1.0 + (other.damagePercentage / 50.0)) * rageMultiplier;
-
-            double baseVx =
-                160.0; // Dikurangi agar musuh tidak langsung terpental jauh di % rendah
-            double baseVy = 80.0;
-
             double knockbackVx = _facingDirection == MoveDirection.right
-                ? (baseVx * knockbackMultiplier)
-                : -(baseVx * knockbackMultiplier);
-            double knockbackVy = -(baseVy * knockbackMultiplier);
+                ? (baseVx * appliedMultiplier)
+                : -(baseVx * appliedMultiplier);
+            double knockbackVy = -(baseVy * appliedMultiplier);
 
             if (other.isRemotePlayer) {
               gameRef.roomRef?.child('players/${other.label}/incomingHit').set({
                 'damageAdded': damageToAdd,
                 'vx': knockbackVx,
                 'vy': knockbackVy,
-                'stun': 0.5,
+                'stun': stunTime,
                 'ts': DateTime.now().millisecondsSinceEpoch,
               });
             }
@@ -583,18 +628,27 @@ class PlayerCharacter extends PositionComponent
             // Terapkan (prediksi) efek langsung ke badan musuh tanpa delay
             other.velocity.x = knockbackVx;
             other.velocity.y = knockbackVy;
-            other.stunTimer = 0.5; // Musuh tidak bisa bergerak selama 0.5 detik
+            other.stunTimer = stunTime;
 
-            // Terapkan Hitstop (freeze selama 80 milidetik agar pukulan terasa berat)
-            hitstopTimer = 0.08;
-            other.hitstopTimer = 0.08;
+            // Terapkan Hitstop
+            hitstopTimer = hitstopTime;
+            other.hitstopTimer = hitstopTime;
 
             // Berikan efek Camera Shake!
             gameRef.shakeCamera(
-              intensity: 8.0 * knockbackMultiplier,
-              duration: 0.2,
+              intensity: shakeInt * appliedMultiplier,
+              duration: 0.25,
             );
           }
+        }
+      }
+
+      if (hitSomeone) {
+        comboCount++;
+        comboResetTimer =
+            1.2; // Pemain punya waktu 1.2 detik untuk menekan punch selanjutnya
+        if (comboCount >= 3) {
+          comboCount = 0; // Reset kembali ke 0 setelah pukulan ke-3 mendarat!
         }
       }
     }
@@ -721,8 +775,12 @@ class PlayerCharacter extends PositionComponent
         removeFromParent(); // Hapus karakter permanen
       } else {
         isRespawning = true;
-        respawnTimer = 1.0;
+        respawnTimer = 5.0; // Tambah delay jadi 5 Detik
         grabCooldownTimer = 0.0; // Reset cooldown kalau mati
+        stunTimer = 0.0;
+        hitstopTimer = 0.0;
+        punchTimer = 0.0;
+        comboCount = 0; // Reset combo
         velocity = Vector2.zero();
         position = Vector2(-100, -100); // Sembunyikan karakter selama respawn
       }
