@@ -1,0 +1,44 @@
+name: Flutter Android Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Workflow ini akan berjalan HANYA jika kamu mem-push tag berawalan 'v' (contoh: v1.0.0)
+
+permissions:
+  contents: write # Diperlukan agar GitHub Action punya izin membuat halaman Release
+
+jobs:
+  build_and_release:
+    name: Build & Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17' # Java 17 direkomendasikan untuk versi Flutter dan Gradle terbaru
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build APK Release
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Kampoeng Rusuh ${{ github.ref_name }}.apk"
+
+      - name: Create GitHub Release & Upload APK
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "build/app/outputs/flutter-apk/Kampoeng Rusuh ${{ github.ref_name }}.apk"
+          generate_release_notes: true
