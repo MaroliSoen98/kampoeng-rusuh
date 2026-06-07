@@ -19,6 +19,9 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
 
   final ValueNotifier<List<int>> playerLivesNotifier = ValueNotifier([]);
   final ValueNotifier<List<double>> playerDamageNotifier = ValueNotifier([]);
+  final ValueNotifier<List<int>> playerRespawnNotifier = ValueNotifier([]);
+  double matchTimer = 180.0;
+  final ValueNotifier<int> matchTimerNotifier = ValueNotifier(180);
   List<String> playerNames = [];
   List<Color> playerColors = [];
 
@@ -125,6 +128,10 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
         String pName = key.toString();
         bool isMe = pName == localPlayerName;
 
+        // Ambil karakter yang dipilih
+        final pData = playersData[pName] as Map<dynamic, dynamic>?;
+        final pChar = pData?['character'] as String? ?? 'anak_sekolah';
+
         playerNames.add(pName);
         playerColors.add(colors[index % colors.length]);
 
@@ -135,6 +142,7 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
           playerIndex: index,
           isPlayer: isMe,
           isRemotePlayer: !isMe,
+          characterName: pChar,
         );
 
         world.add(player);
@@ -145,6 +153,11 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
       }
       playerLivesNotifier.value = List.filled(index, 3);
       playerDamageNotifier.value = List.filled(index, 0.0);
+      playerRespawnNotifier.value = List.filled(index, 0);
+
+      int matchMinutes = data['matchTime'] as int? ?? 3;
+      matchTimer = matchMinutes * 60.0;
+      matchTimerNotifier.value = matchTimer.ceil();
 
       // Pasang Pendengar Event (Pukulan & Tangkapan) untuk Pemain Lokal (Diri Sendiri)
       roomRef!.child('players/$localPlayerName/incomingHit').onValue.listen((
@@ -255,6 +268,8 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
               if (pData['pos']['respawning'] != null) {
                 bool respawning = pData['pos']['respawning'] == true;
                 if (respawning && !p.isRespawning) {
+                  p.respawnTimer =
+                      5.0; // Trigger timer UI lokal untuk bot/lawan
                   p.isRespawning = true;
                   p.position = Vector2(-100, -100);
                   p.velocity = Vector2.zero();
@@ -266,6 +281,14 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
           }
         }
       });
+    }
+  }
+
+  void updateRespawnUI(int index, int seconds) {
+    if (index >= 0 && index < playerRespawnNotifier.value.length) {
+      final list = List<int>.from(playerRespawnNotifier.value);
+      list[index] = seconds;
+      playerRespawnNotifier.value = list;
     }
   }
 
@@ -314,6 +337,17 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
     p1GrabCooldownNotifier.value = player1?.grabCooldownTimer ?? 0.0;
 
     if (!isGameOver) {
+      if (playerNames.isNotEmpty && matchTimer > 0) {
+        matchTimer -= dt;
+        if (matchTimer <= 0) {
+          matchTimer = 0;
+          _triggerGameOverByTime();
+        }
+        int currentSec = matchTimer.ceil();
+        if (matchTimerNotifier.value != currentSec)
+          matchTimerNotifier.value = currentSec;
+      }
+
       final currentLives = playerLivesNotifier.value;
       int aliveCount = currentLives.where((l) => l > 0).length;
 
@@ -335,11 +369,40 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
     shakeTimer = duration;
   }
 
+  void _triggerGameOverByTime() {
+    isGameOver = true;
+    final currentLives = playerLivesNotifier.value;
+    final damages = playerDamageNotifier.value;
+    int bestIndex = -1;
+    int maxLives = -1;
+    double minDamage = double.infinity;
+
+    for (int i = 0; i < currentLives.length; i++) {
+      if (currentLives[i] > maxLives) {
+        maxLives = currentLives[i];
+        minDamage = damages[i];
+        bestIndex = i;
+      } else if (currentLives[i] == maxLives) {
+        if (damages[i] < minDamage) {
+          minDamage = damages[i];
+          bestIndex = i;
+        } else if (damages[i] == minDamage) {
+          bestIndex = -1; // Seri
+        }
+      }
+    }
+
+    winnerName = bestIndex != -1 ? playerNames[bestIndex] : "TIDAK ADA YANG";
+    overlays.add('GameOver');
+  }
+
   void retry() {
     isGameOver = false;
     overlays.remove('GameOver');
     playerLivesNotifier.value = List.filled(playerNames.length, 3);
     playerDamageNotifier.value = List.filled(playerNames.length, 0.0);
+    playerRespawnNotifier.value = List.filled(playerNames.length, 0);
+    matchTimer = 180.0; // Default fallback for offline
     world.children.whereType<PlayerCharacter>().forEach(
       (p) => p.removeFromParent(),
     );

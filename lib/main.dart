@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flame/game.dart';
+import 'package:vector_math/vector_math_64.dart' as vmath;
 import 'game/arena_game.dart';
 import 'game/constants/game_constants.dart';
 import 'home_screen.dart';
@@ -388,49 +389,133 @@ class HUDOverlay extends StatelessWidget {
     return SafeArea(
       // IgnorePointer agar HUD di atas tidak terklik dan memblokir input game
       child: IgnorePointer(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: ValueListenableBuilder<List<int>>(
-            valueListenable: game.playerLivesNotifier,
-            builder: (context, lives, child) {
-              return ValueListenableBuilder<List<double>>(
-                valueListenable: game.playerDamageNotifier,
-                builder: (context, damages, child) {
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount:
-                          4, // 4 Kolom (Mendukung hingga 8 Pemain / 2 Baris)
-                      mainAxisExtent:
-                          105, // Menjamin tinggi setiap slot cukup untuk isi UI-nya
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                    ),
-                    itemCount: lives.length,
-                    itemBuilder: (context, index) {
-                      // Mencegah error bounds jika UI render lebih cepat dari data
-                      if (index >= game.playerNames.length) {
-                        return const SizedBox();
-                      }
+        child: Stack(
+          children: [
+            // ===== MATCH TIMER HUD (TOP CENTER) =====
+            Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 16.0),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: game.matchTimerNotifier,
+                  builder: (context, time, child) {
+                    String mins = (time ~/ 60).toString().padLeft(2, '0');
+                    String secs = (time % 60).toString().padLeft(2, '0');
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.8),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: const Color(0xFFFFD166).withOpacity(0.9),
+                          width: 2.5,
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black54,
+                            offset: Offset(0, 4),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        '$mins:$secs',
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
 
-                      double currentDamage = 0.0;
-                      if (index < damages.length) {
-                        currentDamage = damages[index];
-                      }
+            // ===== PLAYER HUDS (BOTTOM CENTER - SMASH BRAWL STYLE) =====
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(
+                  bottom: 24.0,
+                ), // Offset dari dasar layar
+                child: ValueListenableBuilder<List<int>>(
+                  valueListenable: game.playerLivesNotifier,
+                  builder: (context, lives, child) {
+                    return ValueListenableBuilder<List<double>>(
+                      valueListenable: game.playerDamageNotifier,
+                      builder: (context, damages, child) {
+                        return ValueListenableBuilder<List<int>>(
+                          valueListenable: game.playerRespawnNotifier,
+                          builder: (context, respawns, child) {
+                            List<Widget> leftHuds = [];
+                            List<Widget> rightHuds = [];
 
-                      return PlayerHudSlot(
-                        label: game.playerNames[index],
-                        color: game.playerColors[index],
-                        lives: lives[index],
-                        damage: currentDamage,
-                      );
-                    },
-                  );
-                },
-              );
-            },
-          ),
+                            for (int i = 0; i < lives.length; i++) {
+                              if (i >= game.playerNames.length) continue;
+
+                              double currentDamage = i < damages.length
+                                  ? damages[i]
+                                  : 0.0;
+                              int currentRespawn = i < respawns.length
+                                  ? respawns[i]
+                                  : 0;
+
+                              Widget hud = PlayerHudSlot(
+                                label: game.playerNames[i],
+                                color: game.playerColors[i],
+                                lives: lives[i],
+                                damage: currentDamage,
+                                respawnTime: currentRespawn,
+                                isRightSide: i >= 2, // 0,1 Kiri | 2,3 Kanan
+                              );
+
+                              if (i < 2) {
+                                leftHuds.add(
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12.0,
+                                    ),
+                                    child: hud,
+                                  ),
+                                );
+                              } else {
+                                rightHuds.add(
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12.0,
+                                    ),
+                                    child: hud,
+                                  ),
+                                );
+                              }
+                            }
+
+                            return Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                ...leftHuds,
+                                if (leftHuds.isNotEmpty && rightHuds.isNotEmpty)
+                                  const SizedBox(
+                                    width: 48,
+                                  ), // Jarak di tengah untuk memisahkan kubu
+                                ...rightHuds,
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -443,6 +528,8 @@ class PlayerHudSlot extends StatelessWidget {
   final Color color;
   final int lives;
   final double damage;
+  final int respawnTime;
+  final bool isRightSide; // Flag untuk cermin tata letak
 
   const PlayerHudSlot({
     super.key,
@@ -450,193 +537,282 @@ class PlayerHudSlot extends StatelessWidget {
     required this.color,
     required this.lives,
     required this.damage,
+    this.respawnTime = 0,
+    this.isRightSide = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Opacity(
       opacity: lives > 0 ? 1.0 : 0.4, // Redupkan jika sudah mati
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // 1. Potret Karakter (Miring / Slanted)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4.0),
-            child: Transform.rotate(
-              angle: -0.15, // Efek miring sedikit ke kiri
+      child: SizedBox(
+        width: 180, // Ukuran diperkecil agar tidak memakan banyak layar
+        height: 65,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // ===== NAMEPLATE (Bottom Bar) =====
+            Positioned(
+              bottom: 0,
+              left: isRightSide ? 0 : 50,
+              right: isRightSide ? 50 : 0,
               child: Container(
-                width: 50,
-                height: 50,
+                height: 20,
                 decoration: BoxDecoration(
-                  color: color, // Latar warna pemain solid
-                  border: Border.all(color: Colors.white, width: 2),
+                  color: const Color(
+                    0xFF111111,
+                  ).withOpacity(0.9), // Latar hitam pekat
+                  border: Border(
+                    bottom: BorderSide(
+                      color: color,
+                      width: 2,
+                    ), // Garis bawah warna pemain
+                    top: const BorderSide(color: Color(0xFF333333), width: 1),
+                  ),
                   boxShadow: const [
                     BoxShadow(
                       color: Colors.black54,
-                      offset: Offset(2, 2),
-                      blurRadius: 4,
+                      offset: Offset(0, 2),
+                      blurRadius: 2,
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.person, // Placeholder potret karakter
-                  color: Colors.white70,
-                  size: 36,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // 2. Info Kolom (Teks Persentase & Nameplate)
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Persentase % dan Gambar Watermark Melingkar
-                Stack(
-                  alignment: Alignment.bottomLeft,
-                  clipBehavior: Clip.none,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: isRightSide
+                      ? MainAxisAlignment.end
+                      : MainAxisAlignment.start,
+                  textDirection: isRightSide
+                      ? TextDirection.rtl
+                      : TextDirection.ltr,
                   children: [
-                    // Ikon Watermark di latar belakang
-                    Positioned(
-                      right: 5,
-                      bottom: -8,
-                      child: Icon(
-                        Icons
-                            .sports_martial_arts, // Bisa diganti lambang game Anda
-                        size: 48,
-                        color: color.withOpacity(0.35),
-                      ),
-                    ),
-                    // Teks Persentase dengan Animasi Counter
-                    TweenAnimationBuilder<double>(
-                      tween: Tween<double>(begin: 0.0, end: damage),
-                      duration: const Duration(
-                        milliseconds: 400,
-                      ), // Kecepatan putaran counter
-                      curve: Curves
-                          .easeOutCubic, // Melesat cepat di awal, melambat lembut di akhir
-                      builder: (context, animatedDamage, child) {
-                        // Pindahkan logika pewarnaan ke dalam builder
-                        // agar warna berubah presisi selaras dengan putaran angkanya
-                        Color damageColor = Colors.white;
-                        if (animatedDamage >= 150) {
-                          damageColor = const Color(
-                            0xFFA30000,
-                          ); // Merah Gelap (Kritis)
-                        } else if (animatedDamage >= 90) {
-                          damageColor = const Color(
-                            0xFFFF0000,
-                          ); // Merah Terang (Bahaya)
-                        } else if (animatedDamage >= 40) {
-                          damageColor = const Color(
-                            0xFFFFD700,
-                          ); // Kuning Emas (Menengah)
-                        }
-
-                        return Text(
-                          "${animatedDamage.toStringAsFixed(1)}%", // Format desimal '0.0%'
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            color: damageColor,
-                            fontSize: 32,
-                            fontWeight: FontWeight.w900,
-                            height: 1.0,
-                            shadows: const [
-                              // Efek outline tipis warna hitam & bayangan drop
-                              Shadow(
-                                color: Colors.black,
-                                offset: Offset(-1.5, -1.5),
-                              ),
-                              Shadow(
-                                color: Colors.black,
-                                offset: Offset(1.5, -1.5),
-                              ),
-                              Shadow(
-                                color: Colors.black,
-                                offset: Offset(1.5, 1.5),
-                              ),
-                              Shadow(
-                                color: Colors.black,
-                                offset: Offset(-1.5, 1.5),
-                              ),
-                              Shadow(
-                                color: Colors.black54,
-                                blurRadius: 4,
-                                offset: Offset(2, 2),
-                              ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
-                        );
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-
-                // Nameplate (Abu-abu Gelap + Aksen Warna Pemain)
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2C2C2C), // Dark Grey
-                    border: Border(
-                      top: BorderSide(color: color, width: 3), // Garis aksen
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black54,
-                        offset: Offset(0, 2),
-                        blurRadius: 2,
-                      ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 4,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Teks Nama Karakter
-                      Text(
+                    Expanded(
+                      child: Text(
                         label.toUpperCase(),
                         style: const TextStyle(
                           fontFamily: 'monospace',
                           color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
                           letterSpacing: 1.0,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        textAlign: isRightSide
+                            ? TextAlign.right
+                            : TextAlign.left,
                       ),
-                      const SizedBox(height: 2),
-                      // Indikator Nyawa (Lives)
-                      Row(
-                        children: List.generate(3, (index) {
-                          return Icon(
-                            index < lives
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                            color: index < lives ? color : Colors.grey[600],
-                            size: 14,
-                            shadows: const [
-                              Shadow(color: Colors.black, blurRadius: 2),
-                            ],
-                          );
-                        }),
+                    ),
+                    const SizedBox(width: 6),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(3, (index) {
+                        return Icon(
+                          index < lives
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          color: index < lives ? color : Colors.white30,
+                          size: 10,
+                        );
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ===== HUGE DAMAGE PERCENTAGE =====
+            Positioned(
+              bottom: 16, // Duduk tepat di atas Nameplate
+              left: isRightSide ? 0 : 55,
+              right: isRightSide ? 55 : 0,
+              child: Container(
+                alignment: isRightSide
+                    ? Alignment.bottomRight
+                    : Alignment.bottomLeft,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0.0, end: damage),
+                    duration: const Duration(milliseconds: 400),
+                    builder: (context, animatedDamage, child) {
+                      Color damageColor;
+
+                      // Transisi warna halus (Lerp) berdasarkan persentase
+                      if (animatedDamage < 30) {
+                        // Putih -> Kuning (0% - 30%)
+                        damageColor =
+                            Color.lerp(
+                              Colors.white,
+                              const Color(0xFFFFD700),
+                              animatedDamage / 30.0,
+                            ) ??
+                            Colors.white;
+                      } else if (animatedDamage < 70) {
+                        // Kuning -> Orange (30% - 70%)
+                        damageColor =
+                            Color.lerp(
+                              const Color(0xFFFFD700),
+                              const Color(0xFFFF6D00),
+                              (animatedDamage - 30.0) / 40.0,
+                            ) ??
+                            const Color(0xFFFFD700);
+                      } else if (animatedDamage < 120) {
+                        // Orange -> Merah Terang (70% - 120%)
+                        damageColor =
+                            Color.lerp(
+                              const Color(0xFFFF6D00),
+                              const Color(0xFFD32F2F),
+                              (animatedDamage - 70.0) / 50.0,
+                            ) ??
+                            const Color(0xFFFF6D00);
+                      } else if (animatedDamage < 200) {
+                        // Merah Terang -> Merah Maroon Gelap (120% - 200%)
+                        damageColor =
+                            Color.lerp(
+                              const Color(0xFFD32F2F),
+                              const Color(0xFF5C0000),
+                              (animatedDamage - 120.0) / 80.0,
+                            ) ??
+                            const Color(0xFFD32F2F);
+                      } else {
+                        // Mentok di Maroon Gelap untuk damage sangat ekstrem (>200%)
+                        damageColor = const Color(0xFF5C0000);
+                      }
+
+                      return Text(
+                        "${animatedDamage.toStringAsFixed(1)}%",
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          color: damageColor,
+                          fontSize: 34, // HUGE
+                          fontWeight: FontWeight.w900,
+                          fontStyle:
+                              FontStyle.italic, // Teks miring khas arcade
+                          height: 1.0,
+                          letterSpacing: -1.0,
+                          shadows: const [
+                            // Outline tebal dan bayangan
+                            Shadow(
+                              color: Colors.black,
+                              offset: Offset(-1.5, -1.5),
+                            ),
+                            Shadow(
+                              color: Colors.black,
+                              offset: Offset(1.5, -1.5),
+                            ),
+                            Shadow(
+                              color: Colors.black,
+                              offset: Offset(1.5, 1.5),
+                            ),
+                            Shadow(
+                              color: Colors.black,
+                              offset: Offset(-1.5, 1.5),
+                            ),
+                            Shadow(
+                              color: Colors.black87,
+                              blurRadius: 4,
+                              offset: Offset(3, 3),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+
+            // ===== SLANTED PORTRAIT PANEL =====
+            Positioned(
+              bottom: 0,
+              left: isRightSide ? null : 0,
+              right: isRightSide ? 0 : null,
+              child: Transform(
+                // Skew murni hanya untuk bingkai wajah ini (Menjeritkan gaya Smash Bros)
+                transform: vmath.Matrix4.skewX(isRightSide ? 0.2 : -0.2),
+                child: Container(
+                  width: 55,
+                  height: 55,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        const Color(
+                          0xFF3A3A3A,
+                        ).withOpacity(0.95), // Metallic Gray
+                        const Color(0xFF0A0A0A).withOpacity(0.95), // Black
+                      ],
+                    ),
+                    border: Border.all(
+                      color: const Color(0xFF555555),
+                      width: 1.5,
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black54,
+                        offset: Offset(2, 4),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Inner colored accent line
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(color: color, width: 4),
+                            left: BorderSide(
+                              color: isRightSide ? Colors.transparent : color,
+                              width: 3,
+                            ),
+                            right: BorderSide(
+                              color: isRightSide ? color : Colors.transparent,
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Lawan arah skew agar Icon/Foto tetap lurus
+                      Transform(
+                        transform: vmath.Matrix4.skewX(
+                          isRightSide ? -0.2 : 0.2,
+                        ),
+                        alignment: Alignment.center,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            const Icon(
+                              Icons.person,
+                              color: Colors.white70,
+                              size: 36,
+                            ),
+                            if (respawnTime > 0 && lives > 0)
+                              Container(
+                                color: Colors.black.withOpacity(0.75),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  '$respawnTime',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

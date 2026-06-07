@@ -16,6 +16,7 @@ class PlayerCharacter extends PositionComponent
   final bool isPlayer;
   final bool isRemotePlayer;
   final int playerIndex;
+  final String characterName;
 
   BotController? _botController;
 
@@ -24,6 +25,7 @@ class PlayerCharacter extends PositionComponent
   bool isRespawning = false;
   bool isDead = false;
   double respawnTimer = 0.0;
+  int _lastRespawnSeconds = 0;
   double damagePercentage = 0.0;
 
   MoveDirection _currentDirection = MoveDirection.idle;
@@ -54,6 +56,20 @@ class PlayerCharacter extends PositionComponent
 
   late TextPainter _textPainter;
 
+  SpriteSheet? _punchSheet; // Simpan Sheet-nya saja, bukan animasinya!
+  SpriteSheet? _dashSheet; // Sheet untuk partikel Dash
+
+  // Variabel untuk mekanik Dash
+  double _leftTapTimer = 0.0;
+  double _rightTapTimer = 0.0;
+  double dashTimer = 0.0;
+  double dashCooldownTimer = 0.0;
+
+  // Variabel untuk Sistem Partikel Asap
+  final List<SmokeParticle> _smokeParticles = [];
+  double _smokeSpawnTimer = 0.0;
+  Vector2? _lastPosForSmoke;
+
   PlayerCharacter({
     required this.label,
     required this.color,
@@ -61,6 +77,7 @@ class PlayerCharacter extends PositionComponent
     required this.playerIndex,
     this.isPlayer = false,
     this.isRemotePlayer = false,
+    this.characterName = 'anak_sekolah', // Set ke default karakter
   }) : super(position: position, size: Vector2(20, 56)) {
     if (!isPlayer && !isRemotePlayer) {
       _botController = BotController();
@@ -70,6 +87,11 @@ class PlayerCharacter extends PositionComponent
   // Kontrol via UI sentuh
   void uiMoveLeft(bool isDown) {
     if (isDown) {
+      if (_leftTapTimer > 0 && dashCooldownTimer <= 0) {
+        _startDash(MoveDirection.left);
+      } else {
+        _leftTapTimer = 0.25; // Waktu maksimal untuk tap kedua
+      }
       _currentDirection = MoveDirection.left;
       _facingDirection = MoveDirection.left;
     } else if (_currentDirection == MoveDirection.left) {
@@ -79,6 +101,11 @@ class PlayerCharacter extends PositionComponent
 
   void uiMoveRight(bool isDown) {
     if (isDown) {
+      if (_rightTapTimer > 0 && dashCooldownTimer <= 0) {
+        _startDash(MoveDirection.right);
+      } else {
+        _rightTapTimer = 0.25; // Waktu maksimal untuk tap kedua
+      }
       _currentDirection = MoveDirection.right;
       _facingDirection = MoveDirection.right;
     } else if (_currentDirection == MoveDirection.right) {
@@ -187,6 +214,23 @@ class PlayerCharacter extends PositionComponent
       if (event.logicalKey == LogicalKeyboardKey.keyM) {
         _wantsToPunch = true;
       }
+      // Deteksi tombol arah ditekan untuk mekanisme Dash (Double Tap)
+      if (event.logicalKey == LogicalKeyboardKey.keyA ||
+          event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        if (_leftTapTimer > 0 && dashCooldownTimer <= 0) {
+          _startDash(MoveDirection.left);
+        } else {
+          _leftTapTimer = 0.25;
+        }
+      }
+      if (event.logicalKey == LogicalKeyboardKey.keyD ||
+          event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        if (_rightTapTimer > 0 && dashCooldownTimer <= 0) {
+          _startDash(MoveDirection.right);
+        } else {
+          _rightTapTimer = 0.25;
+        }
+      }
     }
 
     if (keysPressed.contains(LogicalKeyboardKey.keyA) ||
@@ -227,7 +271,7 @@ class PlayerCharacter extends PositionComponent
 
     try {
       final spriteSheetImage = await gameRef.images.load(
-        'characters/player_spritesheet.png',
+        'characters/$characterName.png',
       );
       final spriteSheet = SpriteSheet(
         image: spriteSheetImage,
@@ -267,11 +311,104 @@ class PlayerCharacter extends PositionComponent
     } catch (e) {
       print('Gagal meload spritesheet: $e');
     }
+
+    // Load Spritesheet Animasi Pukulan (Hit Spark)
+    try {
+      final punchImage = await gameRef.images.load('effects/smoke_punch.png');
+      // Asumsi ukuran per-frame adalah 64x64, sesuaikan jika sprite-mu ukurannya berbeda
+      _punchSheet = SpriteSheet(image: punchImage, srcSize: Vector2(64, 64));
+    } catch (e) {
+      print('Gagal meload sprite efek pukulan: $e');
+    }
+
+    // Load Spritesheet Efek Dash
+    try {
+      final dashImage = await gameRef.images.load('effects/smoke_dash.png');
+      _dashSheet = SpriteSheet(image: dashImage, srcSize: Vector2(64, 64));
+    } catch (e) {
+      print('Gagal meload sprite efek dash: $e');
+    }
+  }
+
+  // Eksekutor Dash
+  void _startDash(MoveDirection dir) {
+    dashTimer = 0.2; // Durasi karakter meluncur
+    dashCooldownTimer = 1.0; // Waktu tunggu sebelum bisa dash lagi
+    _facingDirection = dir;
+    _currentDirection = dir;
+
+    if (_dashSheet != null) {
+      final anim = _dashSheet!.createAnimation(
+        row: 0,
+        stepTime: 0.04,
+        from: 0,
+        to: 8, // Membaca 8 frame penuh sesuai spritesheet smoke_dash yang baru
+        loop: false,
+      );
+      final dashEffect = SpriteAnimationComponent(
+        animation: anim,
+        position: Vector2(
+          position.x + size.x / 2,
+          position.y + size.y - 5,
+        ), // Dekat tapak kaki
+        size: Vector2(80, 80),
+        anchor: Anchor.bottomCenter,
+        removeOnFinish: true,
+        priority: 15, // Pastikan efeknya tidak tertutup level
+      );
+
+      // Karena gambar default ditujukan untuk lari ke kanan, kita hanya flip gambarnya saat lari ke kiri
+      if (dir == MoveDirection.left) dashEffect.flipHorizontally();
+
+      gameRef.world.add(dashEffect);
+    }
   }
 
   @override
   void update(double dt) {
     super.update(dt);
+
+    // Kurangi Timer Input dan Dash
+    if (_leftTapTimer > 0) _leftTapTimer -= dt;
+    if (_rightTapTimer > 0) _rightTapTimer -= dt;
+    if (dashCooldownTimer > 0) dashCooldownTimer -= dt;
+    if (dashTimer > 0) dashTimer -= dt;
+
+    // ===== UPDATE SMOKE PARTICLES =====
+    if (_lastPosForSmoke == null) _lastPosForSmoke = position.clone();
+    double moveDx = position.x - _lastPosForSmoke!.x;
+    double moveDy = position.y - _lastPosForSmoke!.y;
+    _lastPosForSmoke = position.clone();
+
+    if (damagePercentage >= 90.0 && !isDead && !isRespawning) {
+      _smokeSpawnTimer -= dt;
+      if (_smokeSpawnTimer <= 0) {
+        _smokeSpawnTimer = 0.05; // Spawn super cepat agar terlihat ngebul!
+        double life = 0.5 + Random().nextDouble() * 0.4; // Umur asap
+        _smokeParticles.add(
+          SmokeParticle(
+            size.x / 2 + (Random().nextDouble() * 16 - 8), // Titik tengah dada
+            size.y / 2 + (Random().nextDouble() * 16 - 8),
+            (Random().nextDouble() - 0.5) * 30, // Kecepatan sebar sumbu X
+            -40 - Random().nextDouble() * 40, // Terbang mengambang ke atas Y
+            life,
+            life,
+            6 + Random().nextDouble() * 6, // Ukuran radius base partikel
+          ),
+        );
+      }
+    }
+
+    for (int i = _smokeParticles.length - 1; i >= 0; i--) {
+      final p = _smokeParticles[i];
+      p.x +=
+          (p.vx * dt) -
+          moveDx; // MELAWAN ARAH KARAKTER AGAR TERTINGGAL DI UDARA!
+      p.y += (p.vy * dt) - moveDy;
+      p.life -= dt;
+      if (p.life <= 0) _smokeParticles.removeAt(i);
+    }
+    // ==================================
 
     _rageFlashTimer += dt; // Timer untuk animasi kedipan Rage
 
@@ -332,13 +469,19 @@ class PlayerCharacter extends PositionComponent
         grabbedCharacter!.isGrabbed = false;
         grabbedCharacter = null;
       }
-      if (!isRemotePlayer) {
-        // Hanya lokal/bot yang menghitung timer dan memicu respawn sendiri
-        respawnTimer -= dt;
-        if (respawnTimer <= 0) {
-          isRespawning = false;
-          gameRef.spawnManager.respawnPlayer(this);
-        }
+
+      respawnTimer -= dt;
+      if (respawnTimer < 0) respawnTimer = 0;
+
+      int currentSeconds = respawnTimer.ceil();
+      if (currentSeconds != _lastRespawnSeconds) {
+        _lastRespawnSeconds = currentSeconds;
+        gameRef.updateRespawnUI(playerIndex, currentSeconds);
+      }
+
+      if (!isRemotePlayer && respawnTimer <= 0) {
+        isRespawning = false;
+        gameRef.spawnManager.respawnPlayer(this);
       }
       return;
     }
@@ -639,6 +782,34 @@ class PlayerCharacter extends PositionComponent
               intensity: shakeInt * appliedMultiplier,
               duration: 0.25,
             );
+
+            // Munculkan efek animasi pukulan jika berhasil diload
+            if (_punchSheet != null) {
+              final anim = _punchSheet!.createAnimation(
+                row: 0,
+                stepTime: 0.04,
+                from: 0,
+                to: 11, // Membaca 11 frame (satu baris penuh) dari sprite smoke_punch
+                loop: false,
+              );
+              final hitEffect = SpriteAnimationComponent(
+                animation: anim,
+                position: Vector2(
+                  otherCenterX,
+                  other.position.y + other.size.y / 3,
+                ), // Di dada musuh
+                size: Vector2(
+                  100,
+                  100,
+                ), // Diperbesar agar efek impaknya terasa!
+                anchor: Anchor.center,
+                removeOnFinish:
+                    true, // Flame akan menghapusnya otomatis setelah animasi selesai!
+                priority:
+                    15, // Pastikan muncul di PALING DEPAN menutupi badan karakter
+              );
+              gameRef.world.add(hitEffect);
+            }
           }
         }
       }
@@ -655,6 +826,14 @@ class PlayerCharacter extends PositionComponent
   }
 
   void _handleMovement() {
+    // Karakter meluncur dengan kecepatan super tinggi saat dash aktif!
+    if (dashTimer > 0) {
+      velocity.x = _facingDirection == MoveDirection.left
+          ? -GameConstants.playerSpeed * 2.5
+          : GameConstants.playerSpeed * 2.5;
+      return; // Kembalikan nilai agar kecepatan dash tidak ditimpa lari biasa
+    }
+
     // Pengereman otomatis: Karakter akan diam/berhenti meluncur
     // jika sedang memukul di atas tanah, agar pukulannya terasa solid!
     if (punchTimer > 0 && isGrounded) {
@@ -769,6 +948,7 @@ class PlayerCharacter extends PositionComponent
       // Reset damage percentage kembali ke 0% saat mati (Ring Out)
       damagePercentage = 0.0;
       updateDamageUI();
+      _smokeParticles.clear(); // Bersihkan efek asap
 
       if (currentLives[playerIndex] <= 0) {
         isDead = true;
@@ -811,8 +991,7 @@ class PlayerCharacter extends PositionComponent
           spriteRenderSize +
           6; // Otomatis pas di bawah kakinya (Ubah angka +6 jika dirasa kurang naik/turun)
 
-      // Filter warna dasar (Bot tertimpa warna 50%, P1 warna transparan normal)
-      Color spriteColor = color.withOpacity(isPlayer ? 0.0 : 0.5);
+      Paint? tintPaint; // Secara default tidak mewarnai Sprite
 
       // Efek Visual RAGE (Berkedip merah menyala saat damage pemain >= 35%)
       if (damagePercentage >= 35.0) {
@@ -828,14 +1007,13 @@ class PlayerCharacter extends PositionComponent
         double currentRageOpacity = maxRageOpacity * flashIntensity;
 
         if (currentRageOpacity > 0.05) {
-          spriteColor = Colors.red.withOpacity(
-            currentRageOpacity,
-          ); // Timpa jadi warna merah uap
+          tintPaint = Paint()
+            ..colorFilter = ColorFilter.mode(
+              Colors.red.withOpacity(currentRageOpacity),
+              BlendMode.srcATop,
+            );
         }
       }
-
-      final tintPaint = Paint()
-        ..colorFilter = ColorFilter.mode(spriteColor, BlendMode.srcATop);
 
       animationTickers![currentAnimation]?.getSprite().render(
         canvas,
@@ -844,6 +1022,28 @@ class PlayerCharacter extends PositionComponent
         overridePaint: tintPaint,
       );
       canvas.restore();
+    }
+
+    // 2. Render Efek Asap Hitam (Otentik Smash Bros Style)
+    if (_smokeParticles.isNotEmpty) {
+      for (final p in _smokeParticles) {
+        final progress = p.life / p.maxLife; // 1.0 ke 0.0
+        final currentRadius =
+            p.radius * (2.5 - progress); // Makin lama makin membesar menyebar
+
+        // Asap pudar di luar (Outline debu yang nge-blend dengan background)
+        final outerPaint = Paint()
+          ..color = const Color(0xFF555555).withOpacity(0.3 * progress)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8.0);
+
+        // Inti asap gelap di dalam yang sangat pekat
+        final innerPaint = Paint()
+          ..color = const Color(0xFF111111).withOpacity(0.7 * progress)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
+
+        canvas.drawCircle(Offset(p.x, p.y), currentRadius * 1.5, outerPaint);
+        canvas.drawCircle(Offset(p.x, p.y), currentRadius, innerPaint);
+      }
     }
 
     // Tulis label (P1, P2) di atas kepala
@@ -967,4 +1167,22 @@ class PlayerCharacter extends PositionComponent
       );
     }
   }
+}
+
+// Class Data Model untuk merepresentasikan sebuah gumpalan asap
+class SmokeParticle {
+  double x, y;
+  double vx, vy;
+  double life, maxLife;
+  double radius;
+
+  SmokeParticle(
+    this.x,
+    this.y,
+    this.vx,
+    this.vy,
+    this.life,
+    this.maxLife,
+    this.radius,
+  );
 }

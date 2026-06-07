@@ -3,6 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'main.dart'; // Perbaikan import karena sekarang posisinya selevel (sama-sama di folder lib)
+import 'game/constants/game_constants.dart';
+import 'package:flame/flame.dart';
+import 'package:flame/sprite.dart';
+import 'package:flame/widgets.dart';
+import 'package:flame/components.dart';
 
 class LobbyScreen extends StatefulWidget {
   final String roomCode;
@@ -113,6 +118,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   ? (data['players'] as Map<dynamic, dynamic>)
                         .cast<String, dynamic>()
                   : <String, dynamic>{};
+
+              final sortedPlayerNames = players.keys.toList().cast<String>()
+                ..sort();
 
               int readyCount = players.values
                   .where((p) => p['isReady'] == true)
@@ -230,250 +238,360 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFFF9E6),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: const Color(0xFF073B4C),
-                                  width: 3,
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFF9E6),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: const Color(0xFF073B4C),
+                                      width: 3,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'READY: $readyCount/$totalPlayers',
+                                    style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      color: Color(0xFF073B4C),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 2.0,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              child: Text(
-                                'READY: $readyCount/$totalPlayers',
-                                style: const TextStyle(
-                                  fontFamily: 'monospace',
-                                  color: Color(0xFF073B4C),
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 2.0,
+                                const SizedBox(width: 12),
+                                // ===== MATCH TIME SELECTOR =====
+                                GestureDetector(
+                                  onTap: isHost
+                                      ? () {
+                                          int matchTime =
+                                              data['matchTime'] as int? ?? 3;
+                                          int nextTime = matchTime == 3
+                                              ? 5
+                                              : (matchTime == 5 ? 8 : 3);
+                                          FirebaseDatabase.instance
+                                              .ref('rooms/${widget.roomCode}')
+                                              .update({'matchTime': nextTime});
+                                        }
+                                      : null,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isHost
+                                          ? const Color(0xFFFFD166)
+                                          : const Color(0xFFFFF9E6),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: const Color(0xFF073B4C),
+                                        width: 3,
+                                      ),
+                                      boxShadow: isHost
+                                          ? const [
+                                              BoxShadow(
+                                                color: Color(0xFF073B4C),
+                                                offset: Offset(0, 3),
+                                              ),
+                                            ]
+                                          : null,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.timer,
+                                          color: Color(0xFF073B4C),
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'TIME: ${data['matchTime'] as int? ?? 3} MINS',
+                                          style: const TextStyle(
+                                            fontFamily: 'monospace',
+                                            color: Color(0xFF073B4C),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 1.0,
+                                          ),
+                                        ),
+                                        if (isHost) ...[
+                                          const SizedBox(width: 8),
+                                          const Icon(
+                                            Icons.loop,
+                                            color: Color(0xFF073B4C),
+                                            size: 18,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
                           ],
                         ),
                         const SizedBox(width: 56), // Spacer penyeimbang
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 16),
 
-                    // ===== MODERN CARTOON TABLE =====
+                    // ===== MAIN CONTENT: PODIUM (70%) & TABLE (30%) =====
                     Expanded(
-                      child: Container(
-                        constraints: const BoxConstraints(maxWidth: 500),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF9E6), // Warm Cream
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: const Color(0xFF073B4C),
-                            width: 3,
-                          ),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0xFF073B4C),
-                              offset: Offset(0, 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // 70% Kiri: Podium Area
+                          Expanded(
+                            flex: 7,
+                            child: _buildPodiums(
+                              sortedPlayerNames,
+                              players,
+                              widget.playerName,
                             ),
-                          ],
-                        ),
-                        child: Column(
-                          children: [
-                            // Table Header
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
-                              ),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFFFD166), // Yellow
-                                borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(20),
+                          ),
+                          const SizedBox(width: 16),
+                          // 30% Kanan: Tabel Area
+                          Expanded(
+                            flex: 3,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFF9E6), // Warm Cream
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: const Color(0xFF073B4C),
+                                  width: 3,
                                 ),
-                                border: Border(
-                                  bottom: BorderSide(
+                                boxShadow: const [
+                                  BoxShadow(
                                     color: Color(0xFF073B4C),
-                                    width: 3,
-                                  ),
-                                ),
-                              ),
-                              child: const Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'PLAYER',
-                                    style: TextStyle(
-                                      fontFamily: 'monospace',
-                                      color: Color(0xFF073B4C),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: 1.5,
-                                    ),
-                                  ),
-                                  Text(
-                                    'STATUS',
-                                    style: TextStyle(
-                                      fontFamily: 'monospace',
-                                      color: Color(0xFF073B4C),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: 1.5,
-                                    ),
+                                    offset: Offset(0, 8),
                                   ),
                                 ],
                               ),
-                            ),
-                            // Table Body (List Pemain)
-                            Expanded(
-                              child: ListView.separated(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                itemCount: players.length,
-                                separatorBuilder: (context, index) =>
-                                    const Divider(
-                                      color: Color(0xFF073B4C),
-                                      thickness: 1,
-                                      height: 4,
-                                    ),
-                                itemBuilder: (context, index) {
-                                  final String pName = players.keys.elementAt(
-                                    index,
-                                  );
-                                  final bool pReady =
-                                      players[pName]?['isReady'] ?? false;
-                                  final bool isMe = pName == widget.playerName;
-
-                                  return Container(
+                              child: Column(
+                                children: [
+                                  // Table Header
+                                  Container(
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 4,
+                                      horizontal: 16,
+                                      vertical: 8,
                                     ),
-                                    decoration: BoxDecoration(
-                                      color: isMe
-                                          ? const Color(
-                                              0xFF4A90E2,
-                                            ).withOpacity(0.15)
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(16),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFFFD166), // Yellow
+                                      borderRadius: BorderRadius.vertical(
+                                        top: Radius.circular(20),
+                                      ),
+                                      border: Border(
+                                        bottom: BorderSide(
+                                          color: Color(0xFF073B4C),
+                                          width: 3,
+                                        ),
+                                      ),
                                     ),
-                                    child: Row(
+                                    child: const Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Row(
-                                          children: [
-                                            CircleAvatar(
-                                              radius: 12,
-                                              backgroundColor: isMe
-                                                  ? const Color(0xFFFFD166)
-                                                  : const Color(0xFFE0E0E0),
-                                              child: Icon(
-                                                Icons.person,
-                                                size: 16,
-                                                color: const Color(0xFF073B4C),
-                                              ),
+                                        Text(
+                                          'PLAYER',
+                                          style: TextStyle(
+                                            fontFamily: 'monospace',
+                                            color: Color(0xFF073B4C),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 1.5,
+                                          ),
+                                        ),
+                                        Text(
+                                          'STATUS',
+                                          style: TextStyle(
+                                            fontFamily: 'monospace',
+                                            color: Color(0xFF073B4C),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 1.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // Table Body (List Pemain)
+                                  Expanded(
+                                    child: ListView.separated(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      itemCount: players.length,
+                                      separatorBuilder: (context, index) =>
+                                          const Divider(
+                                            color: Color(0xFF073B4C),
+                                            thickness: 1,
+                                            height: 4,
+                                          ),
+                                      itemBuilder: (context, index) {
+                                        final String pName = players.keys
+                                            .elementAt(index);
+                                        final bool pReady =
+                                            players[pName]?['isReady'] ?? false;
+                                        final bool isMe =
+                                            pName == widget.playerName;
+
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isMe
+                                                ? const Color(
+                                                    0xFF4A90E2,
+                                                  ).withOpacity(0.15)
+                                                : Colors.transparent,
+                                            borderRadius: BorderRadius.circular(
+                                              16,
                                             ),
-                                            const SizedBox(width: 16),
-                                            Text(
-                                              pName,
-                                              style: TextStyle(
-                                                fontFamily: 'monospace',
-                                                color: const Color(0xFF073B4C),
-                                                fontSize: 14,
-                                                fontWeight: isMe
-                                                    ? FontWeight.w900
-                                                    : FontWeight.normal,
+                                          ),
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  CircleAvatar(
+                                                    radius: 12,
+                                                    backgroundColor: isMe
+                                                        ? const Color(
+                                                            0xFFFFD166,
+                                                          )
+                                                        : const Color(
+                                                            0xFFE0E0E0,
+                                                          ),
+                                                    child: Icon(
+                                                      Icons.person,
+                                                      size: 16,
+                                                      color: const Color(
+                                                        0xFF073B4C,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 16),
+                                                  Text(
+                                                    pName,
+                                                    style: TextStyle(
+                                                      fontFamily: 'monospace',
+                                                      color: const Color(
+                                                        0xFF073B4C,
+                                                      ),
+                                                      fontSize: 14,
+                                                      fontWeight: isMe
+                                                          ? FontWeight.w900
+                                                          : FontWeight.normal,
+                                                    ),
+                                                  ),
+                                                  if (isMe) ...[
+                                                    const SizedBox(width: 12),
+                                                    Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 6,
+                                                            vertical: 2,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(
+                                                          0xFF4A90E2,
+                                                        ),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              8,
+                                                            ),
+                                                        border: Border.all(
+                                                          color: const Color(
+                                                            0xFF073B4C,
+                                                          ),
+                                                          width: 2,
+                                                        ),
+                                                      ),
+                                                      child: const Text(
+                                                        'YOU',
+                                                        style: TextStyle(
+                                                          fontFamily:
+                                                              'monospace',
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight:
+                                                              FontWeight.w900,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
                                               ),
-                                            ),
-                                            if (isMe) ...[
-                                              const SizedBox(width: 12),
+                                              // Badge Status
                                               Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
+                                                      horizontal: 8,
+                                                      vertical: 4,
                                                     ),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(
-                                                    0xFF4A90E2,
-                                                  ),
+                                                  color: pReady
+                                                      ? const Color(
+                                                          0xFF06D6A0,
+                                                        ) // Teal
+                                                      : const Color(
+                                                          0xFFEF476F,
+                                                        ), // Pink
                                                   borderRadius:
-                                                      BorderRadius.circular(8),
+                                                      BorderRadius.circular(16),
                                                   border: Border.all(
                                                     color: const Color(
                                                       0xFF073B4C,
                                                     ),
                                                     width: 2,
                                                   ),
+                                                  boxShadow: const [
+                                                    BoxShadow(
+                                                      color: Color(0xFF073B4C),
+                                                      offset: Offset(0, 3),
+                                                    ),
+                                                  ],
                                                 ),
-                                                child: const Text(
-                                                  'YOU',
+                                                child: Text(
+                                                  pReady ? 'READY' : 'WAITING',
                                                   style: TextStyle(
                                                     fontFamily: 'monospace',
-                                                    color: Colors.white,
-                                                    fontSize: 10,
+                                                    color: pReady
+                                                        ? const Color(
+                                                            0xFF073B4C,
+                                                          )
+                                                        : Colors.white,
+                                                    fontSize: 12,
                                                     fontWeight: FontWeight.w900,
+                                                    letterSpacing: 1.0,
                                                   ),
                                                 ),
                                               ),
                                             ],
-                                          ],
-                                        ),
-                                        // Badge Status
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
                                           ),
-                                          decoration: BoxDecoration(
-                                            color: pReady
-                                                ? const Color(
-                                                    0xFF06D6A0,
-                                                  ) // Teal
-                                                : const Color(
-                                                    0xFFEF476F,
-                                                  ), // Pink
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            border: Border.all(
-                                              color: const Color(0xFF073B4C),
-                                              width: 2,
-                                            ),
-                                            boxShadow: const [
-                                              BoxShadow(
-                                                color: Color(0xFF073B4C),
-                                                offset: Offset(0, 3),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Text(
-                                            pReady ? 'READY' : 'WAITING',
-                                            style: TextStyle(
-                                              fontFamily: 'monospace',
-                                              color: pReady
-                                                  ? const Color(0xFF073B4C)
-                                                  : Colors.white,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w900,
-                                              letterSpacing: 1.0,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
+                                        );
+                                      },
                                     ),
-                                  );
-                                },
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -563,6 +681,333 @@ class _LobbyScreenState extends State<LobbyScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // Fungsi untuk memutar pilihan karakter (Kiri / Kanan)
+  void _changeCharacter(int delta, String currentCharacter) {
+    final List<String> availableCharacters = [
+      'anak_sekolah',
+      'pekerja_scbd',
+      'ibu_daster',
+      'ketua_rt',
+    ];
+
+    int currentIndex = availableCharacters.indexOf(currentCharacter);
+    if (currentIndex == -1) currentIndex = 0;
+
+    int newIndex = (currentIndex + delta) % availableCharacters.length;
+    if (newIndex < 0) newIndex += availableCharacters.length;
+
+    String newChar = availableCharacters[newIndex];
+    FirebaseDatabase.instance
+        .ref('rooms/${widget.roomCode}/players/${widget.playerName}')
+        .update({'character': newChar});
+  }
+
+  Widget _buildPodiums(
+    List<String> sortedNames,
+    Map<String, dynamic> players,
+    String myName,
+  ) {
+    final List<Color> playerColors = [
+      GameConstants.p1Red,
+      GameConstants.p2Blue,
+      GameConstants.p3Yellow,
+      GameConstants.p4Green,
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF9E6).withOpacity(0.5),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF073B4C), width: 3),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: List.generate(4, (index) {
+          if (index < sortedNames.length) {
+            final pName = sortedNames[index];
+            final pReady = players[pName]?['isReady'] ?? false;
+            final pChar = players[pName]?['character'] ?? 'anak_sekolah';
+            final isMe = pName == myName;
+            final color = playerColors[index % playerColors.length];
+
+            return _buildSinglePodium(
+              name: pName,
+              isReady: pReady,
+              isMe: isMe,
+              color: color,
+              character: pChar,
+            );
+          } else {
+            return _buildEmptyPodium();
+          }
+        }),
+      ),
+    );
+  }
+
+  Widget _buildSinglePodium({
+    required String name,
+    required bool isReady,
+    required bool isMe,
+    required Color color,
+    required String character,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Ready status bubble
+        if (isReady)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            margin: const EdgeInsets.only(bottom: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF06D6A0), // Teal
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF073B4C), width: 2),
+            ),
+            child: const Text(
+              'READY',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                color: Color(0xFF073B4C),
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          )
+        else
+          const SizedBox(height: 22),
+
+        // Character Mockup & Selection Arrows
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Kiri Arrow
+            if (isMe)
+              Opacity(
+                opacity: isReady ? 0.0 : 1.0, // Disembunyikan jika sudah Ready
+                child: IconButton(
+                  iconSize: 28,
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                  color: const Color(0xFFFFD166),
+                  onPressed: isReady
+                      ? null
+                      : () => _changeCharacter(-1, character),
+                ),
+              )
+            else
+              const SizedBox(width: 48), // Spacer kosong jika bukan player kita
+            // Animated Sprite Stack
+            Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                PlayerSpriteWidget(isMe: isMe, character: character),
+                if (isMe)
+                  const Positioned(
+                    top: -15,
+                    child: Icon(
+                      Icons.arrow_drop_down,
+                      color: Color(0xFFFFD700),
+                      size: 40,
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
+                    ),
+                  ),
+              ],
+            ),
+
+            // Kanan Arrow
+            if (isMe)
+              Opacity(
+                opacity: isReady ? 0.0 : 1.0, // Disembunyikan jika sudah Ready
+                child: IconButton(
+                  iconSize: 28,
+                  icon: const Icon(Icons.arrow_forward_ios_rounded),
+                  color: const Color(0xFFFFD166),
+                  onPressed: isReady
+                      ? null
+                      : () => _changeCharacter(1, character),
+                ),
+              )
+            else
+              const SizedBox(width: 48), // Spacer kosong jika bukan player kita
+          ],
+        ),
+
+        // Podium Base
+        Container(
+          width: 76,
+          height: 28,
+          decoration: BoxDecoration(
+            color: color, // Pindahkan warna tim ke podium ini
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            border: Border.all(color: const Color(0xFF073B4C), width: 3),
+            boxShadow: const [
+              BoxShadow(color: Color(0xFF073B4C), offset: Offset(0, 4)),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              shadows: [
+                Shadow(
+                  color: Colors.black87,
+                  offset: Offset(1, 1),
+                  blurRadius: 2,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyPodium() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 22),
+        const SizedBox(height: 80), // Sesuaikan dengan tinggi Sprite (80px)
+        // Podium Base
+        Container(
+          width: 76,
+          height: 28,
+          decoration: BoxDecoration(
+            color: const Color(0xFF2C2C2C).withOpacity(0.5), // Dark grey podium
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            border: Border.all(
+              color: const Color(0xFF073B4C).withOpacity(0.5),
+              width: 3,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: const Text(
+            'EMPTY',
+            style: TextStyle(
+              fontFamily: 'monospace',
+              color: Colors.white54,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ====== WIDGET KHUSUS UNTUK ANIMASI SPRITE ======
+class PlayerSpriteWidget extends StatefulWidget {
+  final bool isMe;
+  final String character;
+
+  const PlayerSpriteWidget({
+    super.key,
+    required this.isMe,
+    required this.character,
+  });
+
+  @override
+  State<PlayerSpriteWidget> createState() => _PlayerSpriteWidgetState();
+}
+
+class _PlayerSpriteWidgetState extends State<PlayerSpriteWidget> {
+  SpriteAnimation? _idleAnimation;
+  SpriteAnimationTicker? _idleAnimationTicker;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAnimation();
+  }
+
+  @override
+  void didUpdateWidget(PlayerSpriteWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Deteksi jika variabel character berubah, maka reload ulang animasi!
+    if (oldWidget.character != widget.character) {
+      _loadAnimation();
+    }
+  }
+
+  Future<void> _loadAnimation() async {
+    setState(() {
+      _idleAnimation = null;
+      _idleAnimationTicker = null;
+    });
+
+    try {
+      // Load gambar sesuai dengan parameter character
+      final image = await Flame.images.load(
+        'characters/${widget.character}.png',
+      );
+      final spriteSheet = SpriteSheet(
+        image: image,
+        srcSize: Vector2(64, 64), // Ukuran per frame di gambar
+      );
+
+      // Ambil baris ke-0 (Idle Animation)
+      final anim = spriteSheet.createAnimation(
+        row: 0,
+        stepTime: 0.16,
+        from: 0,
+        to: 6,
+      );
+
+      if (mounted) {
+        setState(() {
+          _idleAnimation = anim;
+          _idleAnimationTicker = anim.createTicker();
+        });
+      }
+    } catch (e) {
+      debugPrint("Gagal meload sprite ${widget.character}: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Selagi gambar dan animasi belum termuat, tampilkan loading kecil
+    if (_idleAnimation == null || _idleAnimationTicker == null) {
+      return const SizedBox(
+        width: 80,
+        height: 80,
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.orangeAccent,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Tampilkan sprite original tanpa timpaan filter warna
+    return SizedBox(
+      width: 80,
+      height: 80,
+      child: SpriteAnimationWidget(
+        animation: _idleAnimation!,
+        animationTicker: _idleAnimationTicker!,
+        playing: true,
+        anchor: Anchor.center,
       ),
     );
   }
