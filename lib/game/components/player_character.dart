@@ -28,6 +28,10 @@ class PlayerCharacter extends PositionComponent
   int _lastRespawnSeconds = 0;
   double damagePercentage = 0.0;
 
+  // 1. Alias damagePercent agar sesuai requirement dan bisa terintegrasi dengan variabel damagePercentage bawaan
+  double get damagePercent => damagePercentage;
+  set damagePercent(double value) => damagePercentage = value;
+
   MoveDirection _currentDirection = MoveDirection.idle;
   MoveDirection _facingDirection = MoveDirection.right;
   bool _wantsToJump = false;
@@ -58,6 +62,7 @@ class PlayerCharacter extends PositionComponent
 
   SpriteSheet? _punchSheet; // Simpan Sheet-nya saja, bukan animasinya!
   SpriteSheet? _dashSheet; // Sheet untuk partikel Dash
+  SpriteSheet? _landSheet; // Sheet untuk efek mendarat
 
   // Variabel untuk mekanik Dash
   double _leftTapTimer = 0.0;
@@ -166,9 +171,22 @@ class PlayerCharacter extends PositionComponent
     velocity.x = vx.toDouble();
     velocity.y = vy.toDouble();
     stunTimer = stun.toDouble();
-    hitstopTimer =
-        0.08; // Efek hitstop saat menerima pukulan (online sinkronisasi)
-    gameRef.shakeCamera();
+
+    // Deteksi apakah ini hantaman Home Run dari pemain lain (>100% dan stun tebal)
+    if (damagePercentage >= 100.0 && stun > 0.3) {
+      hitstopTimer = 0.4;
+      gameRef.shakeCamera(intensity: 15.0, duration: 0.4);
+      gameRef.triggerHomeRunZoom(
+        position + (size / 2),
+      ); // Kamera zoom ke target (Offline/Online)
+      // Tambahkan pemicu efek Slow Motion saat menerima pukulan Home Run (Online)
+      gameRef.triggerSlowMo(
+        realWorldDuration: 0.8,
+      ); // Efek slowmo selama 0.8 detik
+    } else {
+      hitstopTimer = 0.08;
+      gameRef.shakeCamera();
+    }
   }
 
   // Fungsi Menerima Tangkapan Eksternal (Online)
@@ -328,6 +346,15 @@ class PlayerCharacter extends PositionComponent
     } catch (e) {
       print('Gagal meload sprite efek dash: $e');
     }
+
+    // Load Spritesheet Efek Mendarat
+    try {
+      final landImage = await gameRef.images.load('effects/smoke_land.png');
+      // Asumsi frame 64x64, silakan sesuaikan jika resolusinya berbeda
+      _landSheet = SpriteSheet(image: landImage, srcSize: Vector2(64, 64));
+    } catch (e) {
+      print('Gagal meload sprite efek mendarat: $e');
+    }
   }
 
   // Eksekutor Dash
@@ -364,6 +391,33 @@ class PlayerCharacter extends PositionComponent
     }
   }
 
+  // Eksekutor Efek Mendarat
+  void _spawnLandEffect() {
+    if (_landSheet != null) {
+      final anim = _landSheet!.createAnimation(
+        row: 0,
+        stepTime: 0.04,
+        from: 0,
+        to: 8, // Sesuaikan dengan jumlah frame gambar smoke_land.png Anda
+        loop: false,
+      );
+      final landEffect = SpriteAnimationComponent(
+        animation: anim,
+        position: Vector2(
+          position.x + size.x / 2,
+          position.y + size.y + 20,
+        ), // Diturunkan lebih ke bawah lagi agar tepat menempel dengan dasar platform pijakan
+        size: Vector2(90, 90), // Ukuran asap debu
+        anchor: Anchor
+            .center, // Ubah dari bottomCenter ke center agar menyelimuti kaki
+        removeOnFinish: true,
+        priority:
+            14, // Berada di depan background tapi tidak terlalu menutupi aksi pukulan
+      );
+      gameRef.world.add(landEffect);
+    }
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
@@ -375,7 +429,7 @@ class PlayerCharacter extends PositionComponent
     if (dashTimer > 0) dashTimer -= dt;
 
     // ===== UPDATE SMOKE PARTICLES =====
-    if (_lastPosForSmoke == null) _lastPosForSmoke = position.clone();
+    _lastPosForSmoke ??= position.clone();
     double moveDx = position.x - _lastPosForSmoke!.x;
     double moveDy = position.y - _lastPosForSmoke!.y;
     _lastPosForSmoke = position.clone();
@@ -415,8 +469,11 @@ class PlayerCharacter extends PositionComponent
     if (isDead) return;
 
     if (hitstopTimer > 0) {
-      hitstopTimer -= dt;
-      return; // Freeze seluruh karakter (animasi, gerakan fisika, dan status) saat Hitstop aktif
+      // Gunakan dt yang tidak diskalakan agar durasi hitstop konsisten di dunia nyata
+      // dan tidak melambat karena efek slow motion.
+      final unscaledDt = gameRef.timeScale > 0 ? dt / gameRef.timeScale : dt;
+      hitstopTimer -= unscaledDt;
+      return; // Freeze karakter saat Hitstop aktif
     }
 
     if (comboResetTimer > 0) {
@@ -491,6 +548,13 @@ class PlayerCharacter extends PositionComponent
 
     if (stunTimer > 0) {
       stunTimer -= dt;
+      // --- Mekanik Tumble (Terkunci dalam efek terlempar) ---
+      // Jika stun hampir habis tapi karakter masih melayang kencang,
+      // pertahankan sedikit stun agar mereka tetap memantul saat nabrak platform/tembok.
+      if (stunTimer <= 0 &&
+          (!isGrounded && (velocity.x.abs() > 150 || velocity.y.abs() > 250))) {
+        stunTimer = 0.1;
+      }
     } else {
       if (!isPlayer && !isRemotePlayer) {
         _botController!.update(dt, this);
@@ -713,75 +777,113 @@ class PlayerCharacter extends PositionComponent
           // Cek tabrakan hitbox tinju dengan badan musuh DAN dipastikan berhadapan
           if (isFacingTarget && punchRect.overlaps(other.toRect())) {
             hitSomeone = true;
-            int currentHit = comboCount + 1;
-            double damageToAdd;
-            double baseVx;
-            double baseVy;
-            double stunTime;
-            double hitstopTime;
-            double shakeInt;
-            double
-            appliedMultiplier; // Tambahkan variabel pengontrol multiplier
 
-            if (currentHit < 3) {
-              // PUKULAN JAB 1 & 2: RAHASIA SMASH BROS (Set Knockback)
-              // Jarak mundur selalu konsisten, tidak peduli % damage musuh, agar combo selalu nyambung!
-              damageToAdd = 2.0 + (Random().nextDouble() * 1.5);
-              baseVx = 35.0; // Pushback pendek dan konstan
-              baseVy = 0.0; // Tetap berpijak di tanah
-              stunTime = 0.5; // Stun pas agar kita bisa lanjut pukul
-              hitstopTime = 0.05;
-              shakeInt = 1.0;
-              appliedMultiplier =
-                  1.0; // <- RAHASIA: Tidak dikalikan damage % musuh!
+            int currentHit = comboCount + 1;
+
+            // --- Implementasi Sistem Combo & Launch Attack ---
+            // Jika musuh sudah 100% atau lebih, jadikan pukulan APAPUN sebagai Finisher/Launch Attack
+            bool isLaunchAttack =
+                currentHit >= 3 || other.damagePercent >= 100.0;
+
+            AttackData currentAttack;
+            if (!isLaunchAttack) {
+              // Jab 1 & 2 (Pukulan ringan combo beruntun)
+              currentAttack = const AttackData(
+                damage: 2.0,
+                baseKnockback: 80.0, // Dorongan pendek ke belakang
+                knockbackGrowth:
+                    0.0, // Tidak akan terpental sejauh apapun damage musuh
+                verticalRatio: 0.0, // Tetap menapak di tanah
+                stunDuration:
+                    0.4, // Stun konstan yang pas untuk menyambung combo
+              );
             } else {
-              // FINISHER JAB 3: SMASH ATTACK (Scaling Knockback)
-              // Musuh terlempar melayang ke udara sesuai % damage mereka!
-              damageToAdd = 7.0 + (Random().nextDouble() * 3.0);
-              baseVx = 160.0; // Momentum horizontal lemparan
-              baseVy = 130.0; // Momentum vertikal (Di-launching ke udara)
-              stunTime = 0.8;
-              hitstopTime = 0.18; // Freeze frame JEDARR yang lebih lama!
-              shakeInt = 10.0; // Getaran layar lebih epik
-              // <- RAHASIA: Baru di hit ke-3 multiplier damage berlaku!
-              appliedMultiplier =
-                  (1.0 + ((other.damagePercentage + damageToAdd) / 50.0)) *
-                  rageMultiplier;
+              // Hit 3 Finisher (Atau pukulan berapapun jika musuh sudah kritis >= 100%)
+              currentAttack = const AttackData(
+                damage: 6.0,
+                baseKnockback: 300.0,
+                knockbackGrowth: 4.0,
+                verticalRatio: 0.45, // Diangkat ke udara untuk efek pantulan
+                stunDuration: 0.35,
+              );
             }
 
-            // Tambah persentase damage dengan variasi desimal
-            other.damagePercentage += damageToAdd;
+            // Tambahkan damagePercent musuh
+            other.damagePercent += currentAttack.damage;
             other.updateDamageUI();
 
-            double knockbackVx = _facingDirection == MoveDirection.right
-                ? (baseVx * appliedMultiplier)
-                : -(baseVx * appliedMultiplier);
-            double knockbackVy = -(baseVy * appliedMultiplier);
+            // Hitung knockback berdasarkan damagePercent musuh
+            double knockbackPower =
+                currentAttack.baseKnockback +
+                (other.damagePercent * currentAttack.knockbackGrowth);
+
+            // --- Mekanik Rocket Launch (Home Run) jika Damage >= 100% ---
+            // Pukulan apapun sekarang akan memicu Rocket Launch jika damage menembus 100%!
+            bool isHomeRun = other.damagePercent >= 100.0;
+            if (isHomeRun) {
+              knockbackPower *= 2.8;
+            }
+
+            // Arah launch (launch direction)
+            double directionX = _facingDirection == MoveDirection.right
+                ? 1.0
+                : -1.0;
+
+            // Hitung velocity.x dan velocity.y
+            double velocityX = directionX * knockbackPower;
+            double velocityY;
+            if (isHomeRun) {
+              velocityY = -knockbackPower * 1.0; // Sudut bisbol diagonal
+            } else {
+              velocityY = -knockbackPower * currentAttack.verticalRatio;
+            }
+
+            // Hitung durasi stun
+            // Jab tidak memerlukan penambahan stun agar delay combo selalu konsisten
+            double calculatedStun = !isLaunchAttack
+                ? currentAttack.stunDuration
+                : currentAttack.stunDuration + (other.damagePercent * 0.005);
 
             if (other.isRemotePlayer) {
               gameRef.roomRef?.child('players/${other.label}/incomingHit').set({
-                'damageAdded': damageToAdd,
-                'vx': knockbackVx,
-                'vy': knockbackVy,
-                'stun': stunTime,
+                'damageAdded': currentAttack.damage,
+                'vx': velocityX,
+                'vy': velocityY,
+                'stun': calculatedStun,
                 'ts': DateTime.now().millisecondsSinceEpoch,
               });
             }
 
-            // Terapkan (prediksi) efek langsung ke badan musuh tanpa delay
-            other.velocity.x = knockbackVx;
-            other.velocity.y = knockbackVy;
-            other.stunTimer = stunTime;
+            other.velocity.x = velocityX;
+            other.velocity.y = velocityY;
 
-            // Terapkan Hitstop
-            hitstopTimer = hitstopTime;
-            other.hitstopTimer = hitstopTime;
+            // Musuh hanya kehilangan pijakan (melayang di udara) saat terkena Launch Attack
+            if (isLaunchAttack) {
+              other.isGrounded = false;
+            }
 
-            // Berikan efek Camera Shake!
-            gameRef.shakeCamera(
-              intensity: shakeInt * appliedMultiplier,
-              duration: 0.25,
-            );
+            other.stunTimer = calculatedStun;
+
+            // Terapkan Hitstop (Layar ter-pause sesaat)
+            double currentHitstop = isHomeRun
+                ? 0.4 // Diperpanjang agar layar terhenti pas saat sedang dizoom ekstrim!
+                : (isLaunchAttack ? 0.15 : 0.05);
+            hitstopTimer = currentHitstop;
+            other.hitstopTimer = currentHitstop;
+
+            // Berikan efek Camera Shake bergantung tipe serangan
+            double shakeInt = isHomeRun ? 15.0 : (isLaunchAttack ? 8.0 : 2.0);
+            double shakeDur = isHomeRun ? 0.4 : (isLaunchAttack ? 0.2 : 0.1);
+            gameRef.shakeCamera(intensity: shakeInt, duration: shakeDur);
+
+            // Terapkan Efek Kamera Zoom gaya Smash Bros!
+            if (isHomeRun) {
+              gameRef.triggerHomeRunZoom(other.position + (other.size / 2));
+              // Tambahkan pemicu efek Slow Motion!
+              gameRef.triggerSlowMo(
+                realWorldDuration: 0.8,
+              ); // Efek slowmo selama 0.8 detik
+            }
 
             // Munculkan efek animasi pukulan jika berhasil diload
             if (_punchSheet != null) {
@@ -851,6 +953,9 @@ class PlayerCharacter extends PositionComponent
   }
 
   void _applyPhysics(double dt) {
+    bool wasGrounded =
+        isGrounded; // Simpan status pijakan kaki di frame sebelumnya
+
     // Terapkan gravitasi
     velocity.y += GameConstants.gravity * dt;
 
@@ -878,7 +983,7 @@ class PlayerCharacter extends PositionComponent
 
     // 2. Bergerak secara Vertikal dan Cek Tabrakan Sumbu Y
     position.y += velocity.y * dt;
-    _checkCollisionsY(previousPos);
+    _checkCollisionsY(previousPos, wasGrounded);
   }
 
   void _checkCollisionsX() {
@@ -889,15 +994,25 @@ class PlayerCharacter extends PositionComponent
         } else if (velocity.x < 0) {
           position.x = platform.position.x + platform.size.x;
         }
-        if (!isPlayer) {
-          _botController?.reverseDirection(); // Bot berbalik saat mentok
+
+        // --- Mekanik Bounce (Pantulan Tembok) ---
+        if (stunTimer > 0 && velocity.x.abs() > 100) {
+          velocity.x =
+              -velocity.x *
+              0.4; // Daya membal TEMBOK diperkecil ke 40% agar pantulan pendek
+          stunTimer += 0.2; // Perpanjang stun agar terus meluncur
+          gameRef.shakeCamera(intensity: 5.0, duration: 0.1); // Efek benturan
+        } else {
+          if (!isPlayer) {
+            _botController?.reverseDirection(); // Bot berbalik saat mentok
+          }
+          velocity.x = 0;
         }
-        velocity.x = 0;
       }
     }
   }
 
-  void _checkCollisionsY(Vector2 previousPos) {
+  void _checkCollisionsY(Vector2 previousPos, bool wasGrounded) {
     isGrounded = false;
     for (final platform in gameRef.platforms) {
       // Cek apakah ini platform utama/dasar (berada di posisi Y paling bawah)
@@ -913,13 +1028,38 @@ class PlayerCharacter extends PositionComponent
         if (velocity.y > 0 &&
             previousPos.y + size.y <= platform.position.y + 15) {
           position.y = platform.position.y - size.y;
-          velocity.y = 0;
-          isGrounded = true;
-          _jumpCount = 0; // Reset lompatan saat mendarat di platform
+
+          // --- Mekanik Bounce (Pantulan Lantai) ---
+          if (stunTimer > 0 && velocity.y > 100) {
+            velocity.y =
+                -velocity.y *
+                0.45; // Daya membal LANTAI diperkecil ke 45% agar tidak terlalu tinggi
+            velocity.x *=
+                0.5; // Gesekan tanah diperbesar (50%) agar musuh tidak kelamaan terseret jauh
+            isGrounded = false;
+            stunTimer += 0.2; // Perpanjang stun
+            gameRef.shakeCamera(intensity: 4.0, duration: 0.1);
+          } else {
+            if (!wasGrounded) {
+              _spawnLandEffect(); // Hanya munculkan debu jika sebelumnya ia berada di udara
+            }
+            velocity.y = 0;
+            isGrounded = true;
+            _jumpCount = 0; // Reset lompatan saat mendarat di platform
+          }
         } else if (velocity.y < 0) {
           // Kepala menabrak bagian bawah platform
           position.y = platform.position.y + platform.size.y;
-          velocity.y = 0;
+          if (stunTimer > 0 && velocity.y.abs() > 100) {
+            // Pantulan Plafon
+            velocity.y =
+                -velocity.y * 0.45; // Daya membal PLAFON diperkecil ke 45%
+            velocity.x *= 0.5; // Tambahkan gesekan plafon
+            stunTimer += 0.2;
+            gameRef.shakeCamera(intensity: 4.0, duration: 0.1);
+          } else {
+            velocity.y = 0;
+          }
         }
       }
     }
@@ -931,15 +1071,59 @@ class PlayerCharacter extends PositionComponent
     // Mereka akan terhitung mati ketika posisi Y mereka melewati deathZoneY.
   }
 
+  // Memunculkan efek garis lurus visual yang menandakan jatuhnya karakter (Blast Line/Ring Out)
+  void spawnRingOutEffect() {
+    // Jangan spawn efek jika posisi sudah direset (teleport ke -100, -100)
+    if (position.x == -100 && position.y == -100) return;
+
+    // Dapatkan area layar yang terlihat oleh kamera saat ini
+    final camera = gameRef.camera;
+    final visibleLeft = camera.viewfinder.position.x;
+    final visibleTop = camera.viewfinder.position.y;
+    final visibleWidth = camera.viewport.size.x / camera.viewfinder.zoom;
+    final visibleHeight = camera.viewport.size.y / camera.viewfinder.zoom;
+
+    // Mengunci tepat di garis tepi batas layar agar presisi dengan titik jatuhnya lawan
+    double minX = visibleLeft;
+    double maxX = visibleLeft + visibleWidth;
+    double minY = visibleTop;
+    double maxY = visibleTop + visibleHeight;
+
+    double cx = position.x + size.x / 2;
+    double cy = position.y + size.y / 2;
+
+    double spawnX = cx.clamp(minX, maxX);
+    double spawnY = cy.clamp(minY, maxY);
+
+    final beam = RingOutBeam(
+      position: Vector2(spawnX, spawnY),
+      velocityAtDeath: velocity.clone(),
+    );
+    gameRef.world.add(beam);
+
+    // Tambahkan efek getaran kamera layar dramatis khas KO
+    gameRef.shakeCamera(intensity: 20.0, duration: 0.5);
+  }
+
   void _checkDeath() {
     if (isDead) return;
 
-    // Jatuh ke jurang bawah batas dunia
-    if (position.y > GameConstants.deathZoneY) {
+    // 9. KO zone horizontal dan atas/bawah (Launch Attack KO boundaries)
+    // Jarak KO Zone diperlebar agar musuh terlihat meluncur jauh ke langit sebelum dihitung KO
+    bool isOutLeft = position.x < -600;
+    bool isOutRight = position.x > GameConstants.worldWidth + 600;
+    bool isOutTop =
+        position.y <
+        -1500; // Jauhkan ke atas agar efek terbang Home Run sangat terasa
+    bool isOutBottom = position.y > GameConstants.deathZoneY;
+
+    if (isOutLeft || isOutRight || isOutTop || isOutBottom) {
       if (grabbedCharacter != null) {
         grabbedCharacter!.isGrabbed = false;
         grabbedCharacter = null;
       }
+
+      spawnRingOutEffect(); // Panggil fungsi memunculkan beam merah
 
       final currentLives = List<int>.from(gameRef.playerLivesNotifier.value);
       currentLives[playerIndex]--;
@@ -963,6 +1147,7 @@ class PlayerCharacter extends PositionComponent
         comboCount = 0; // Reset combo
         velocity = Vector2.zero();
         position = Vector2(-100, -100); // Sembunyikan karakter selama respawn
+        isGrounded = false; // 10. Set false sampai mendarat
       }
     }
   }
@@ -1169,6 +1354,23 @@ class PlayerCharacter extends PositionComponent
   }
 }
 
+// 2. Struktur data untuk menyimpan properties serangan (Attack Data)
+class AttackData {
+  final double damage;
+  final double baseKnockback;
+  final double knockbackGrowth;
+  final double verticalRatio;
+  final double stunDuration;
+
+  const AttackData({
+    required this.damage,
+    required this.baseKnockback,
+    required this.knockbackGrowth,
+    required this.verticalRatio,
+    required this.stunDuration,
+  });
+}
+
 // Class Data Model untuk merepresentasikan sebuah gumpalan asap
 class SmokeParticle {
   double x, y;
@@ -1185,4 +1387,68 @@ class SmokeParticle {
     this.maxLife,
     this.radius,
   );
+}
+
+// ====== CLASS VISUAL EFFECT UNTUK RING OUT (BLAST LINE) ======
+class RingOutBeam extends SpriteAnimationComponent with HasGameRef<ArenaGame> {
+  final Vector2 velocityAtDeath;
+  bool _isAssetLoaded = false;
+  double _fallbackTimer = 0.8;
+
+  RingOutBeam({required Vector2 position, required this.velocityAtDeath})
+    : super(position: position, anchor: Anchor.center);
+
+  @override
+  Future<void> onLoad() async {
+    try {
+      final image = await gameRef.images.load(
+        'effects/exhaust_spritesheet.png',
+      );
+
+      // Hitung otomatis ukuran gambar aslimu! (Mencegah error out of bounds)
+      final int totalFrames =
+          8; // Ganti angka ini jika jumlah gambar gerakanmu bukan 8
+      final double frameWidth = image.width / totalFrames;
+      final double frameHeight = image.height.toDouble();
+
+      animation = SpriteAnimation.fromFrameData(
+        image,
+        SpriteAnimationData.sequenced(
+          amount: totalFrames,
+          stepTime:
+              0.08, // Diperlambat sedikit agar kilatnya terlihat lebih lama
+          textureSize: Vector2(frameWidth, frameHeight),
+          loop: false,
+        ),
+      );
+      _isAssetLoaded = true;
+      removeOnFinish = true;
+    } catch (e) {
+      debugPrint('GAGAL MEMUAT GAMBAR exhaust_spritesheet: $e');
+      _isAssetLoaded = false;
+    }
+
+    size = Vector2(1200, 1200); // Diperbesar 3x lipat agar sangat masif
+    priority = 1000; // Prioritas maksimal di atas segala objek lain
+
+    // 4. Hitung sudut putaran kemiringan (angle) agar sejajar jatuhnya karakter
+    Vector2 dir = velocityAtDeath.length2 > 10
+        ? velocityAtDeath.normalized()
+        : Vector2(0, 1);
+
+    // Menggunakan nilai minus (-dir) agar memancar berlawanan arah / menusuk ke arena
+    angle = atan2(-dir.y, -dir.x);
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    // Jika gambar gagal dimuat, hapus komponen manual saat timer habis
+    if (!_isAssetLoaded) {
+      _fallbackTimer -= dt;
+      if (_fallbackTimer <= 0) {
+        removeFromParent();
+      }
+    }
+  }
 }

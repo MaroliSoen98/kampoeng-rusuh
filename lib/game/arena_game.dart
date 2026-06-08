@@ -35,15 +35,36 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
 
   final String? roomCode;
   final String? localPlayerName;
+  final String offlineCharacter;
+  final List<String> offlineBotCharacters;
 
   DatabaseReference? roomRef;
   double syncTimer = 0.0;
 
-  ArenaGame({this.roomCode, this.localPlayerName})
-    : super(
-        // Hapus FixedResolution agar tidak ada clipping/batasan hitam di layar lebar
-        camera: CameraComponent(),
-      );
+  // --- Variabel untuk Kamera Zoom Home Run ---
+  double defaultZoom = 1.0;
+  double zoomTimer = 0.0;
+  Vector2 zoomFocusPosition = Vector2.zero();
+
+  // --- Variabel untuk Slow Motion ---
+  double _slowMoTimer = 0.0;
+  final double _slowMoFactor =
+      0.15; // Seberapa lambat (0.15 = 15% kecepatan normal)
+  double timeScale = 1.0; // Definisi variabel timeScale untuk slow motion
+
+  ArenaGame({
+    this.roomCode,
+    this.localPlayerName,
+    this.offlineCharacter = 'anak_sekolah',
+    this.offlineBotCharacters = const [
+      'pekerja_scbd',
+      'ibu_daster',
+      'ketua_rt',
+    ],
+  }) : super(
+         // Hapus FixedResolution agar tidak ada clipping/batasan hitam di layar lebar
+         camera: CameraComponent(),
+       );
 
   // Definisikan overlay di sini agar bisa diakses sebelum game di-render
   Map<String, Widget Function(BuildContext, Game)> get overlayBuilderMap => {
@@ -64,14 +85,18 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
     if (size.y == 0) return;
 
     // Sesuaikan zoom kamera agar tinggi layar selalu pas dengan tinggi arena (720)
-    camera.viewfinder.zoom = size.y / GameConstants.worldHeight;
+    defaultZoom = size.y / GameConstants.worldHeight;
+    if (zoomTimer <= 0) {
+      camera.viewfinder.zoom = defaultZoom;
+    }
 
     // Hitung offset agar pusat arena (1280px) berada tepat di tengah layar ultra-wide
-    double visibleWidth = size.x / camera.viewfinder.zoom;
+    double visibleWidth = size.x / defaultZoom;
     double offsetX = (GameConstants.worldWidth - visibleWidth) / 2;
 
     baseCameraPosition = Vector2(offsetX, 0);
-    camera.viewfinder.position = baseCameraPosition.clone();
+    if (zoomTimer <= 0 && shakeTimer <= 0)
+      camera.viewfinder.position = baseCameraPosition.clone();
     camera.viewfinder.anchor = Anchor.topLeft;
   }
 
@@ -100,8 +125,17 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
     final snapshot = await roomRef!.get();
 
     if (snapshot.exists) {
-      final data = snapshot.value as Map<dynamic, dynamic>;
-      final playersData = data['players'] as Map<dynamic, dynamic>;
+      final data = snapshot.value as Map<dynamic, dynamic>?;
+      if (data == null || data['players'] == null) {
+        debugPrint('Data room tidak valid atau belum ada player!');
+        return;
+      }
+
+      // Mencegah crash jika struktur data players terbaca sebagai List oleh Firebase
+      final playersRaw = data['players'];
+      final playersData = playersRaw is List
+          ? playersRaw.asMap()
+          : playersRaw as Map<dynamic, dynamic>;
 
       int index = 0;
       final colors = [
@@ -120,12 +154,18 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
       playerNames.clear();
       playerColors.clear();
 
-      // Urutkan nama pemain secara alfabetis agar indeks warna sama persis di layar semua orang
-      final sortedKeys = playersData.keys.toList()..sort();
+      // Urutkan secara alfabetis, kemudian kunci host di posisi indeks paling pertama (P1)
+      final hostName = data['host'] as String? ?? '';
+      final sortedKeys = playersData.keys.map((e) => e.toString()).toList()
+        ..sort();
+      if (sortedKeys.contains(hostName)) {
+        sortedKeys.remove(hostName);
+        sortedKeys.insert(0, hostName);
+      }
 
       // Spawn semua pemain Party
       for (var key in sortedKeys) {
-        String pName = key.toString();
+        String pName = key;
         bool isMe = pName == localPlayerName;
 
         // Ambil karakter yang dipilih
@@ -252,7 +292,8 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
                   // Mencegah indikator UI mundur/berkedip karena delay ping internet.
                   // Update hanya jika damage naik, atau ketika musuh terkonfirmasi mati (reset ke 0).
                   if (remoteDamage > p.damagePercentage ||
-                      (remoteDamage == 0.0 && p.isDead)) {
+                      remoteDamage == 0.0) {
+                    // FIX: Pastikan UI lawan mereset ke 0.0% saat respawn
                     p.damagePercentage = remoteDamage;
                     p.updateDamageUI();
                   }
@@ -261,6 +302,9 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
 
               if (pData['pos']['dead'] != null) {
                 bool isNowDead = pData['pos']['dead'] == true;
+                if (isNowDead && !p.isDead) {
+                  p.spawnRingOutEffect();
+                }
                 p.isDead = isNowDead;
                 if (isNowDead && p.parent != null) p.removeFromParent();
               }
@@ -268,6 +312,7 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
               if (pData['pos']['respawning'] != null) {
                 bool respawning = pData['pos']['respawning'] == true;
                 if (respawning && !p.isRespawning) {
+                  p.spawnRingOutEffect();
                   p.respawnTimer =
                       5.0; // Trigger timer UI lokal untuk bot/lawan
                   p.isRespawning = true;
@@ -294,7 +339,19 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
 
   @override
   void update(double dt) {
-    super.update(dt);
+    // --- Logika Slow Motion ---
+    // Harus dijalankan di awal agar dt untuk semua child ter-update dengan benar
+    if (_slowMoTimer > 0) {
+      // dt di ArenaGame.update adalah waktu asli (unscaled), jadi timer berjalan secara real-time
+      _slowMoTimer -= dt;
+      if (_slowMoTimer <= 0) {
+        timeScale = 1.0; // Kembalikan kecepatan normal saat timer habis
+      }
+    }
+
+    super.update(
+      dt * timeScale,
+    ); // Terapkan slow motion ke seluruh komponen dalam game (Karakter, Fisika, Animasi)
 
     // Sinkronisasi posisi player local ke Firebase (20x per detik)
     // Kondisi !isDead dihapus agar saat pemain mati, status dead-nya tetap terkirim ke lawan.
@@ -323,15 +380,52 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
       }
     }
 
+    // --- EFEK KAMERA ZOOM & SHAKE ---
+    Vector2 currentCamTarget = baseCameraPosition.clone();
+
+    if (zoomTimer > 0) {
+      zoomTimer -= dt;
+
+      double maxZoom =
+          defaultZoom * 1.6; // Skala Zoom-in 1.6x (Sangat dekat & dramatis!)
+      double currentZoom = defaultZoom;
+      double t = 0.0; // Interpolasi pentalan layar
+
+      if (zoomTimer > 0.8) {
+        t = (1.0 - zoomTimer) / 0.2; // Fase tarik (masuk) super cepat
+        currentZoom = defaultZoom + (maxZoom - defaultZoom) * t;
+      } else if (zoomTimer > 0.2) {
+        t = 1.0; // Fase hold (menahan zoom)
+        currentZoom = maxZoom;
+      } else {
+        t = zoomTimer / 0.2; // Fase lepas (mundur/kembali semula)
+        currentZoom = defaultZoom + (maxZoom - defaultZoom) * t;
+      }
+
+      if (zoomTimer <= 0) {
+        camera.viewfinder.zoom = defaultZoom;
+      } else {
+        camera.viewfinder.zoom = currentZoom;
+        Vector2 screenCenterOffset = (size / currentZoom) / 2;
+        Vector2 idealCamPos = zoomFocusPosition - screenCenterOffset;
+
+        currentCamTarget.x =
+            baseCameraPosition.x + (idealCamPos.x - baseCameraPosition.x) * t;
+        currentCamTarget.y =
+            baseCameraPosition.y + (idealCamPos.y - baseCameraPosition.y) * t;
+      }
+    } else {
+      camera.viewfinder.zoom = defaultZoom;
+    }
+
     if (shakeTimer > 0) {
       shakeTimer -= dt;
       final random = Random();
       final dx = (random.nextDouble() - 0.5) * shakeIntensity;
       final dy = (random.nextDouble() - 0.5) * shakeIntensity;
-      camera.viewfinder.position = baseCameraPosition + Vector2(dx, dy);
-      if (shakeTimer <= 0) {
-        camera.viewfinder.position = baseCameraPosition.clone();
-      }
+      camera.viewfinder.position = currentCamTarget + Vector2(dx, dy);
+    } else {
+      camera.viewfinder.position = currentCamTarget;
     }
 
     p1GrabCooldownNotifier.value = player1?.grabCooldownTimer ?? 0.0;
@@ -344,8 +438,9 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
           _triggerGameOverByTime();
         }
         int currentSec = matchTimer.ceil();
-        if (matchTimerNotifier.value != currentSec)
+        if (matchTimerNotifier.value != currentSec) {
           matchTimerNotifier.value = currentSec;
+        }
       }
 
       final currentLives = playerLivesNotifier.value;
@@ -367,6 +462,17 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
   void shakeCamera({double intensity = 8.0, double duration = 0.2}) {
     shakeIntensity = intensity;
     shakeTimer = duration;
+  }
+
+  void triggerHomeRunZoom(Vector2 focusPos) {
+    zoomFocusPosition = focusPos.clone();
+    zoomTimer = 1.0; // Zoom akan berlangsung selama total 1 detik penuh
+  }
+
+  void triggerSlowMo({required double realWorldDuration}) {
+    timeScale = _slowMoFactor;
+    // Timer diupdate menggunakan waktu asli (unscaled), cukup set durasi sesuai real time
+    _slowMoTimer = realWorldDuration;
   }
 
   void _triggerGameOverByTime() {

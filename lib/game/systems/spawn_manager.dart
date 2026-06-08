@@ -18,48 +18,42 @@ class SpawnManager {
   }
 
   void initialSpawns() {
-    game.playerNames = ['P1', 'P2', 'P3', 'P4'];
+    int totalPlayers = 1 + game.offlineBotCharacters.length;
+    game.playerNames = ['P1', 'P2', 'P3', 'P4'].sublist(0, totalPlayers);
     game.playerColors = [
       GameConstants.p1Red,
       GameConstants.p2Blue,
       GameConstants.p3Yellow,
       GameConstants.p4Green,
-    ];
-    game.playerLivesNotifier.value = [3, 3, 3, 3];
+    ].sublist(0, totalPlayers);
+    game.playerLivesNotifier.value = List.filled(totalPlayers, 3);
+    game.playerDamageNotifier.value = List.filled(totalPlayers, 0.0);
+    game.playerRespawnNotifier.value = List.filled(totalPlayers, 0);
 
+    // Untuk diri sendiri (Player1)
     game.player1 = PlayerCharacter(
       label: game.playerNames[0],
       color: game.playerColors[0],
       position: _getRandomSpawn(),
       isPlayer: true,
       playerIndex: 0,
+      characterName: game.offlineCharacter,
     );
     game.world.add(game.player1!);
 
-    game.world.add(
-      PlayerCharacter(
-        label: game.playerNames[1],
-        color: game.playerColors[1],
-        position: _getRandomSpawn(),
-        playerIndex: 1,
-      ),
-    );
-    game.world.add(
-      PlayerCharacter(
-        label: game.playerNames[2],
-        color: game.playerColors[2],
-        position: _getRandomSpawn(),
-        playerIndex: 2,
-      ),
-    );
-    game.world.add(
-      PlayerCharacter(
-        label: game.playerNames[3],
-        color: game.playerColors[3],
-        position: _getRandomSpawn(),
-        playerIndex: 3,
-      ),
-    );
+    // Untuk bot
+    for (int i = 0; i < game.offlineBotCharacters.length; i++) {
+      int playerIndex = i + 1;
+      game.world.add(
+        PlayerCharacter(
+          label: game.playerNames[playerIndex],
+          color: game.playerColors[playerIndex],
+          position: _getRandomSpawn(),
+          playerIndex: playerIndex,
+          characterName: game.offlineBotCharacters[i],
+        ),
+      );
+    }
   }
 
   void respawnPlayer(PlayerCharacter player) {

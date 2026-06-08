@@ -39,8 +39,20 @@ void main() async {
 class GameScreen extends StatefulWidget {
   final String? roomCode;
   final String? playerName;
+  final String offlineCharacter;
+  final List<String> offlineBotCharacters;
 
-  const GameScreen({super.key, this.roomCode, this.playerName});
+  const GameScreen({
+    super.key,
+    this.roomCode,
+    this.playerName,
+    this.offlineCharacter = 'anak_sekolah',
+    this.offlineBotCharacters = const [
+      'pekerja_scbd',
+      'ibu_daster',
+      'ketua_rt',
+    ],
+  });
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -55,6 +67,8 @@ class _GameScreenState extends State<GameScreen> {
     _game = ArenaGame(
       roomCode: widget.roomCode,
       localPlayerName: widget.playerName,
+      offlineCharacter: widget.offlineCharacter,
+      offlineBotCharacters: widget.offlineBotCharacters,
     );
   }
 

@@ -119,8 +119,16 @@ class _LobbyScreenState extends State<LobbyScreen> {
                         .cast<String, dynamic>()
                   : <String, dynamic>{};
 
+              final hostName = data['host'] as String? ?? '';
+              final isHost = hostName == widget.playerName;
+
               final sortedPlayerNames = players.keys.toList().cast<String>()
                 ..sort();
+              // Pastikan host selalu berada di urutan paling kiri (Player 1)
+              if (sortedPlayerNames.contains(hostName)) {
+                sortedPlayerNames.remove(hostName);
+                sortedPlayerNames.insert(0, hostName);
+              }
 
               int readyCount = players.values
                   .where((p) => p['isReady'] == true)
@@ -129,11 +137,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
               bool isMeReady = players[widget.playerName]?['isReady'] ?? false;
               bool allReady = totalPlayers > 0 && readyCount == totalPlayers;
 
-              final hostName = data['host'] as String? ?? '';
-              final isHost = hostName == widget.playerName;
-
               return Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 8.0,
+                ), // Padding vertikal diperkecil
                 child: Column(
                   children: [
                     // ===== HEADER LOBBY =====
@@ -192,9 +200,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
                               style: TextStyle(
                                 fontFamily: 'monospace',
                                 color: Color(0xFFFFD700), // Gold/Yellow
-                                fontSize: 28,
+                                fontSize:
+                                    24, // Diperkecil dari 28 agar tidak makan tempat
                                 fontWeight: FontWeight.w900,
-                                letterSpacing: 2.0,
+                                letterSpacing: 1.5,
                                 shadows: [
                                   Shadow(
                                     color: Color(0xFF1A237E),
@@ -207,11 +216,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
-                                vertical: 4,
+                                vertical: 2, // Diperkecil
                               ),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFFFF9E6), // Warm Cream
@@ -238,7 +247,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 8),
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -342,16 +351,16 @@ class _LobbyScreenState extends State<LobbyScreen> {
                         const SizedBox(width: 56), // Spacer penyeimbang
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
 
-                    // ===== MAIN CONTENT: PODIUM (70%) & TABLE (30%) =====
+                    // ===== MAIN CONTENT: PODIUM & TABLE =====
                     Expanded(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // 70% Kiri: Podium Area
+                          // Area Kiri: Podium
                           Expanded(
-                            flex: 7,
+                            flex: 2, // Menggunakan rasio 2 (66.6%)
                             child: _buildPodiums(
                               sortedPlayerNames,
                               players,
@@ -359,9 +368,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
                             ),
                           ),
                           const SizedBox(width: 16),
-                          // 30% Kanan: Tabel Area
+                          // Area Kanan: Tabel
                           Expanded(
-                            flex: 3,
+                            flex: 1, // Menggunakan rasio 1 (33.3%)
                             child: Container(
                               decoration: BoxDecoration(
                                 color: const Color(0xFFFFF9E6), // Warm Cream
@@ -485,17 +494,23 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                                     ),
                                                   ),
                                                   const SizedBox(width: 16),
-                                                  Text(
-                                                    pName,
-                                                    style: TextStyle(
-                                                      fontFamily: 'monospace',
-                                                      color: const Color(
-                                                        0xFF073B4C,
+                                                  // Expanded agar nama panjang terpotong '...' dan tidak merusak layout
+                                                  Expanded(
+                                                    child: Text(
+                                                      pName,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                        fontFamily: 'monospace',
+                                                        color: const Color(
+                                                          0xFF073B4C,
+                                                        ),
+                                                        fontSize: 14,
+                                                        fontWeight: isMe
+                                                            ? FontWeight.w900
+                                                            : FontWeight.normal,
                                                       ),
-                                                      fontSize: 14,
-                                                      fontWeight: isMe
-                                                          ? FontWeight.w900
-                                                          : FontWeight.normal,
                                                     ),
                                                   ),
                                                   if (isMe) ...[
@@ -659,7 +674,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
       child: Opacity(
         opacity: disabled ? 0.5 : 1.0,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 8,
+          ), // Padding vertikal diturunkan
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(20),
@@ -725,28 +743,40 @@ class _LobbyScreenState extends State<LobbyScreen> {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: const Color(0xFF073B4C), width: 3),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: List.generate(4, (index) {
-          if (index < sortedNames.length) {
-            final pName = sortedNames[index];
-            final pReady = players[pName]?['isReady'] ?? false;
-            final pChar = players[pName]?['character'] ?? 'anak_sekolah';
-            final isMe = pName == myName;
-            final color = playerColors[index % playerColors.length];
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.bottomCenter,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: List.generate(4, (index) {
+            Widget podiumContent;
+            if (index < sortedNames.length) {
+              final pName = sortedNames[index];
+              final pReady = players[pName]?['isReady'] ?? false;
+              final pChar = players[pName]?['character'] ?? 'anak_sekolah';
+              final isMe = pName == myName;
+              final color = playerColors[index % playerColors.length];
 
-            return _buildSinglePodium(
-              name: pName,
-              isReady: pReady,
-              isMe: isMe,
-              color: color,
-              character: pChar,
+              podiumContent = _buildSinglePodium(
+                name: pName,
+                isReady: pReady,
+                isMe: isMe,
+                color: color,
+                character: pChar,
+              );
+            } else {
+              podiumContent = _buildEmptyPodium();
+            }
+
+            // Gunakan fixed width yang sama persis (176px) untuk keempat slot.
+            // Ini menjamin jarak gap (celah) tetap rapi dan seimbang seperti di offline lobby.
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: SizedBox(width: 176, child: podiumContent),
             );
-          } else {
-            return _buildEmptyPodium();
-          }
-        }),
+          }),
+        ),
       ),
     );
   }
@@ -881,7 +911,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         const SizedBox(height: 22),
-        const SizedBox(height: 80), // Sesuaikan dengan tinggi Sprite (80px)
+        const SizedBox(
+          height: 80,
+        ), // Samakan tinggi dengan ruang karakter & panah
         // Podium Base
         Container(
           width: 76,
