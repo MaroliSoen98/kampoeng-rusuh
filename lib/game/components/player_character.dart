@@ -48,6 +48,8 @@ class PlayerCharacter extends PositionComponent
   PlayerCharacter? grabbedCharacter;
   double grabTimer = 0.0;
   bool isGrabbed = false;
+  int pummelCount = 0;
+  double pummelCooldownTimer = 0.0;
   double stunTimer = 0.0;
   double hitstopTimer = 0.0;
   double punchTimer = 0.0;
@@ -74,6 +76,7 @@ class PlayerCharacter extends PositionComponent
   final List<SmokeParticle> _smokeParticles = [];
   double _smokeSpawnTimer = 0.0;
   Vector2? _lastPosForSmoke;
+  double _kbSmokeTimer = 0.0; // Timer untuk Knockback Smoke Trail
 
   PlayerCharacter({
     required this.label,
@@ -464,6 +467,25 @@ class PlayerCharacter extends PositionComponent
     }
     // ==================================
 
+    // ===== UPDATE KNOCKBACK SMOKE TRAIL =====
+    if (damagePercentage >= 50.0 &&
+        stunTimer > 0 &&
+        !isGrounded &&
+        velocity.length > 200) {
+      _kbSmokeTimer -= dt;
+      if (_kbSmokeTimer <= 0) {
+        _kbSmokeTimer =
+            0.06; // Frekuensi spawn efek (semakin kecil makin rapat)
+        gameRef.world.add(
+          KnockbackSmokeParticle(
+            position: position + (size / 2),
+            velocityAtSpawn: velocity.clone(),
+          ),
+        );
+      }
+    }
+    // ========================================
+
     _rageFlashTimer += dt; // Timer untuk animasi kedipan Rage
 
     if (isDead) return;
@@ -628,14 +650,53 @@ class PlayerCharacter extends PositionComponent
 
   void _handleGrabLogic(double dt) {
     if (grabbedCharacter != null) {
-      // Posisikan musuh yang ditangkap di atas kepala
-      grabbedCharacter!.position =
-          position + Vector2(0, -grabbedCharacter!.size.y);
+      // Posisikan musuh di depan karakter (bukan di atas kepala lagi)
+      double offsetX = _facingDirection == MoveDirection.right
+          ? size.x * 0.6
+          : -size.x * 0.6;
+      grabbedCharacter!.position = position + Vector2(offsetX, 0);
       grabbedCharacter!.velocity = Vector2.zero();
 
       grabTimer += dt;
+      if (pummelCooldownTimer > 0) pummelCooldownTimer -= dt;
+
+      bool triggerThrow = false;
+
+      // Fitur PUMMEL: Memukul musuh saat ditangkap
+      if (_wantsToPunch && pummelCooldownTimer <= 0) {
+        pummelCount++;
+        pummelCooldownTimer = 0.25; // Jeda antar pukulan saat grab
+
+        double pummelDamage = 2.5; // Damage kecil setiap pukulan
+        grabbedCharacter!.damagePercentage += pummelDamage;
+        grabbedCharacter!.updateDamageUI();
+
+        // Hitstop ringan & Getaran Kamera
+        hitstopTimer = 0.05;
+        gameRef.shakeCamera(intensity: 2.0, duration: 0.1);
+
+        if (grabbedCharacter!.isRemotePlayer) {
+          gameRef.roomRef
+              ?.child('players/${grabbedCharacter!.label}/incomingHit')
+              .set({
+                'damageAdded': pummelDamage,
+                'vx': 0,
+                'vy': 0,
+                'stun': 0.1,
+                'ts': DateTime.now().millisecondsSinceEpoch,
+              });
+        }
+
+        if (pummelCount >= 5) {
+          triggerThrow = true; // Otomatis lempar di pukulan ke-5
+        }
+      }
 
       if (_wantsToGrab) {
+        triggerThrow = true;
+      }
+
+      if (triggerThrow) {
         // Tambah damage untuk bantingan dengan variasi desimal
         double damageToAdd =
             12.0 +
@@ -672,7 +733,8 @@ class PlayerCharacter extends PositionComponent
             1.0; // Stun musuh 1 detik setelah dilempar
         grabbedCharacter!.velocity = Vector2(throwVx, throwVy);
         grabbedCharacter = null;
-        grabCooldownTimer = 15.0; // Mulai cooldown 15 detik setelah melempar
+        grabCooldownTimer = 30.0; // Mulai cooldown 30 detik setelah melempar
+        pummelCount = 0;
 
         gameRef.shakeCamera(
           intensity: 12.0 * knockbackMultiplier,
@@ -690,7 +752,8 @@ class PlayerCharacter extends PositionComponent
         }
         grabbedCharacter!.isGrabbed = false;
         grabbedCharacter = null;
-        grabCooldownTimer = 15.0; // Mulai cooldown 15 detik setelah terlepas
+        grabCooldownTimer = 30.0; // Mulai cooldown 30 detik setelah terlepas
+        pummelCount = 0;
       }
     } else {
       // Hanya bisa grab jika cooldown sudah habis (<= 0)
@@ -988,6 +1051,9 @@ class PlayerCharacter extends PositionComponent
 
   void _checkCollisionsX() {
     for (final platform in gameRef.platforms) {
+      if (platform.isJumpThrough)
+        continue; // Jangan block gerakan horizontal untuk bangunan
+
       if (toRect().overlaps(platform.toRect())) {
         if (velocity.x > 0) {
           position.x = platform.position.x - size.x;
@@ -1015,11 +1081,8 @@ class PlayerCharacter extends PositionComponent
   void _checkCollisionsY(Vector2 previousPos, bool wasGrounded) {
     isGrounded = false;
     for (final platform in gameRef.platforms) {
-      // Cek apakah ini platform utama/dasar (berada di posisi Y paling bawah)
-      bool isGroundPlatform = platform.position.y >= 600;
-
-      // Jika pemain sedang mode drop-down dan ini bukan platform dasar, abaikan tabrakan
-      if (!isGroundPlatform && _ignorePlatformTimer > 0) {
+      // Jika pemain sedang mode drop-down dan ini adalah platform tembus, abaikan tabrakan
+      if (platform.isJumpThrough && _ignorePlatformTimer > 0) {
         continue;
       }
 
@@ -1048,6 +1111,9 @@ class PlayerCharacter extends PositionComponent
             _jumpCount = 0; // Reset lompatan saat mendarat di platform
           }
         } else if (velocity.y < 0) {
+          if (platform.isJumpThrough)
+            continue; // Biarkan pemain melompat menembus dari bawah
+
           // Kepala menabrak bagian bawah platform
           position.y = platform.position.y + platform.size.y;
           if (stunTimer > 0 && velocity.y.abs() > 100) {
@@ -1238,9 +1304,9 @@ class PlayerCharacter extends PositionComponent
     if (grabbedCharacter != null) {
       final double radius = 18.0; // Perbesar ukuran timer lingkaran
       final Offset center = Offset(
-        size.x + 25, // Disesuaikan sedikit lebih jauh ke kanan
-        25,
-      ); // Di sebelah kanan karakter
+        size.x / 2, // Di tengah secara horizontal
+        -45, // Di atas kepala
+      ); // Di atas kepala karakter
 
       // Ring background (opsional agar terlihat track-nya)
       final bgPaint = Paint()
@@ -1350,6 +1416,75 @@ class PlayerCharacter extends PositionComponent
           localY - _textPainter.height / 2,
         ),
       );
+    }
+  }
+}
+
+// ====== CLASS VISUAL EFFECT UNTUK TRAIL SMOKE KNOCKBACK ======
+class KnockbackSmokeParticle extends SpriteAnimationComponent
+    with HasGameRef<ArenaGame> {
+  final Vector2 velocityAtSpawn;
+  bool _isAssetLoaded = false;
+  double _fallbackTimer = 0.5;
+
+  KnockbackSmokeParticle({
+    required Vector2 position,
+    required this.velocityAtSpawn,
+  }) : super(position: position, anchor: Anchor.center);
+
+  @override
+  Future<void> onLoad() async {
+    try {
+      final image = await gameRef.images.load('effects/smoke_knockback.png');
+
+      // Hitung otomatis ukuran per frame (Asumsi animasi 1 baris memanjang horizontal)
+      final int totalFrames =
+          8; // Ubah angka ini jika jumlah gambarnya bukan 8!
+      final double frameWidth = image.width / totalFrames;
+      final double frameHeight = image.height.toDouble();
+
+      animation = SpriteAnimation.fromFrameData(
+        image,
+        SpriteAnimationData.sequenced(
+          amount: totalFrames,
+          stepTime: 0.05,
+          textureSize: Vector2(frameWidth, frameHeight),
+          loop: false,
+        ),
+      );
+      _isAssetLoaded = true;
+      removeOnFinish = true; // Otomatis dihapus jika animasinya kelar
+    } catch (e) {
+      debugPrint('GAGAL MEMUAT GAMBAR smoke_knockback.png: $e');
+      _isAssetLoaded = false;
+    }
+
+    size = Vector2(90, 90); // Ukuran efek
+    priority = 14;
+
+    opacity = 0.9; // "samar samar dikit", set 90% opacity (0.9) awal
+
+    // Hadapkan rotasi sprite berlawanan dengan arah jatuhnya/terpentalnya pemain
+    Vector2 dir = velocityAtSpawn.length2 > 10
+        ? velocityAtSpawn.normalized()
+        : Vector2(-1, 0);
+    angle = atan2(-dir.y, -dir.x);
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    if (!_isAssetLoaded) {
+      _fallbackTimer -= dt;
+      if (_fallbackTimer <= 0) {
+        removeFromParent();
+      }
+      return;
+    }
+
+    // Efek memudar secara perlahan sambil partikel tertinggal di belakang
+    if (opacity > 0.0) {
+      opacity = (opacity - (dt * 1.5)).clamp(0.0, 1.0);
     }
   }
 }

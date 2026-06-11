@@ -187,7 +187,7 @@ class TouchControlsOverlay extends StatelessWidget {
                   width: size,
                   height: size,
                   child: CircularProgressIndicator(
-                    value: cooldown / 15.0, // Dibagi 15 detik (durasi max)
+                    value: cooldown / 30.0, // Dibagi 30 detik (durasi max)
                     strokeWidth: 4,
                     color: Colors.orangeAccent,
                   ),

@@ -1,25 +1,69 @@
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../constants/game_constants.dart';
+import '../arena_game.dart';
 
-class PlatformComponent extends PositionComponent {
-  PlatformComponent({required Vector2 position, required Vector2 size})
-    : super(position: position, size: size);
+enum PlatformType {
+  mainGround,
+  warungRoof,
+  balcony,
+  centerPlatform,
+  extraPlatform,
+}
+
+class PlatformComponent extends PositionComponent with HasGameRef<ArenaGame> {
+  final bool isJumpThrough;
+  final int depth;
+  final PlatformType type;
+
+  PlatformComponent({
+    required Vector2 position,
+    required Vector2 size,
+    this.isJumpThrough = false,
+    this.depth = 0,
+    this.type = PlatformType.mainGround,
+  }) : super(position: position, size: size);
 
   @override
   void render(Canvas canvas) {
+    // Jika mode debug dimatikan, jangan render bentuk visual platformnya
+    if (!gameRef.showStageColliders) return;
+
     super.render(canvas);
 
-    // Gambar garis luar (outline)
-    final outlinePaint = Paint()..color = GameConstants.platOutline;
-    canvas.drawRect(size.toRect(), outlinePaint);
+    Color bodyColor;
+    Color outlineColor = Colors.black87.withOpacity(0.5);
 
-    // Gambar bagian utama platform
-    final bodyPaint = Paint()..color = GameConstants.platBody;
-    canvas.drawRect(Rect.fromLTWH(2, 2, size.x - 4, size.y - 4), bodyPaint);
+    switch (type) {
+      case PlatformType.mainGround:
+        bodyColor = const Color(0xFF424242).withOpacity(0.5); // Dark gray
+        break;
+      case PlatformType.warungRoof:
+        bodyColor = const Color(0xFF8B4513).withOpacity(0.5); // Reddish brown
+        break;
+      case PlatformType.balcony:
+        bodyColor = const Color(0xFF6D4C41).withOpacity(0.5); // Muted brown
+        break;
+      case PlatformType.centerPlatform:
+        bodyColor = const Color(0xFF8D6E63).withOpacity(0.5); // Wooden brown
+        break;
+      case PlatformType.extraPlatform:
+        bodyColor = const Color(
+          0xFF00C853,
+        ).withOpacity(0.5); // Hijau terang agar mudah dilacak
+        break;
+    }
 
-    // Gambar highlight atas untuk efek retro
-    final highlightPaint = Paint()..color = GameConstants.platHighlight;
-    canvas.drawRect(Rect.fromLTWH(2, 2, size.x - 4, 4), highlightPaint);
+    // Gambar platform body (Debug placeholder)
+    canvas.drawRect(size.toRect(), Paint()..color = bodyColor);
+
+    // Gambar border outline agar platform terlihat terpisah dengan background
+    canvas.drawRect(
+      size.toRect(),
+      Paint()
+        ..color = outlineColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
   }
 }

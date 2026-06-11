@@ -51,8 +51,11 @@ class BotController {
 
   void _decideAction(PlayerCharacter self) {
     if (self.grabbedCharacter != null) {
-      // Jika sedang menggendong musuh, langsung lemparkan!
-      wantsToGrab = true;
+      // Jika menangkap musuh, bot akan memukul (pummel) berkali-kali!
+      if (_actionTimer <= 0) {
+        _actionTimer = 0.2; // Spam pukulan setiap 0.2 detik agar combo cepat
+        wantsToPunch = true;
+      }
       return;
     }
 

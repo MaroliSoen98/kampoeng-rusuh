@@ -60,6 +60,9 @@ flutter:
     - assets/images/characters/
     - assets/images/effects/
     - assets/images/platforms/
+    - assets/images/stage/bg_rusun_midground.png
+    - assets/images/stage/warung_body.png
+    - assets/images/stage/asphalt_ground.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

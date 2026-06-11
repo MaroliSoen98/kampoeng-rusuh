@@ -19,6 +19,8 @@ class _OfflineLobbyScreenState extends State<OfflineLobbyScreen> {
     'pekerja_scbd',
     'ibu_daster',
     'ketua_rt',
+    'kurir',
+    'hansip',
   ];
 
   // Daftar karakter default untuk para bot

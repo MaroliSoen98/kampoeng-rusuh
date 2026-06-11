@@ -3,7 +3,6 @@ import 'dart:math';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:kampoeng_rusuh/lobby_screen.dart';
-import 'package:kampoeng_rusuh/main.dart';
 import 'package:kampoeng_rusuh/offline_lobby_screen.dart';
 
 class HomeScreen extends StatefulWidget {

@@ -8,12 +8,16 @@ import 'constants/game_constants.dart';
 import 'components/platform_component.dart';
 import 'components/player_character.dart';
 import 'components/bot_controller.dart';
+import 'components/stage_visual_layer.dart';
 import 'systems/spawn_manager.dart';
 import '../main.dart'; // Tambahkan import ini untuk mengakses Overlay dari main.dart
 
 class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
   late final SpawnManager spawnManager;
   final List<PlatformComponent> platforms = [];
+
+  // Flag untuk menampilkan atau menyembunyikan kotak debug platform
+  bool showStageColliders = false; // Nyalakan sementara untuk cek platform baru
 
   PlayerCharacter? player1;
 
@@ -95,8 +99,9 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
     double offsetX = (GameConstants.worldWidth - visibleWidth) / 2;
 
     baseCameraPosition = Vector2(offsetX, 0);
-    if (zoomTimer <= 0 && shakeTimer <= 0)
+    if (zoomTimer <= 0 && shakeTimer <= 0) {
       camera.viewfinder.position = baseCameraPosition.clone();
+    }
     camera.viewfinder.anchor = Anchor.topLeft;
   }
 
@@ -106,6 +111,50 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
   @override
   Future<void> onLoad() async {
     try {
+      // --- 1. LOAD STAGE VISUAL ASSETS ---
+      final bgRusunSprite = await loadSprite('stage/bg_rusun_midground.png');
+      final warungBodySprite = await loadSprite('stage/warung_body.png');
+      final asphaltGroundSprite = await loadSprite('stage/asphalt_ground.png');
+
+      // --- 2. ADD BACKGROUND LAYER ---
+      world.add(
+        StageVisualLayer(
+          sprite: bgRusunSprite,
+          position: Vector2.zero(), // Mulai dari pojok kiri atas (0,0)
+          size: Vector2(1280, 720), // Resolusi penuh arena
+          priority: -20, // Render paling belakang
+        ),
+      );
+
+      // --- 3. ADD WARUNG BODY LAYER ---
+      world.add(
+        StageVisualLayer(
+          sprite: warungBodySprite,
+          position: Vector2(
+            140,
+            410, // Diturunkan sedikit agar gerobak lebih ke bawah
+          ), // Sesuaikan ini nanti jika asset warung tidak 1280x720
+          size: Vector2(1000, 220), // Sesuaikan ukuran aslinya jika diperlukan
+          priority:
+              -1, // Render di depan aspal (-2), tapi di belakang player (0)
+        ),
+      );
+
+      // --- 4. ADD ASPHALT GROUND LAYER ---
+      world.add(
+        StageVisualLayer(
+          sprite: asphaltGroundSprite,
+          position: Vector2(
+            0,
+            120, // Perbesar angka ini agar GAMBAR aspal semakin turun ke bawah
+          ),
+          size: Vector2(1280, 720), // Asumsi gambar diekspor full screen 16:9
+          priority: -2, // Di depan warung (-5) tapi di belakang pemain (0)
+        ),
+      );
+      // -----------------------------------
+
+      // Menambahkan platform (colliders)
       _createArena();
 
       spawnManager = SpawnManager(this);
@@ -520,28 +569,93 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
   }
 
   void _createArena() {
-    // Platform dasar utama di bawah
-    _addPlatform(Vector2(140, 600), Vector2(1000, 50));
+    // Main Ground
+    _addPlatform(
+      Vector2(
+        0, // Dimulai dari paling ujung kiri layar
+        630, // Y diperbesar agar hitbox turun sejajar dengan gambar aspal
+      ), // Ubah Y=600 ini jika pijakan karakter kurang naik/turun ke aspal
+      Vector2(
+        1280, // Memenuhi seluruh lebar layar (1280 piksel)
+        100,
+      ), // Ubah ukuran X/Y ini jika area jatuh (jurang) perlu dilebarkan
+      isJumpThrough: false,
+      depth: 0,
+      type: PlatformType.mainGround,
+    );
 
-    // Platform tengah kiri
-    _addPlatform(Vector2(100, 450), Vector2(250, 30));
+    // Left Warung Roof
+    _addPlatform(
+      Vector2(235, 455), // Y ditambah (dari 430 ke 450) agar atap lebih turun
+      Vector2(235, 18),
+      isJumpThrough: true,
+      type: PlatformType.warungRoof,
+    );
 
-    // Platform tengah kanan
-    _addPlatform(Vector2(930, 450), Vector2(250, 30));
+    // Right Warung Roof
+    _addPlatform(
+      Vector2(860, 455), // Y ditambah (dari 430 ke 450) agar atap lebih turun
+      Vector2(210, 18), // Lebar (X) dikurangi agar tidak kepanjangan
+      isJumpThrough: true,
+      type: PlatformType.warungRoof,
+    );
 
-    // Platform pusat
-    _addPlatform(Vector2(490, 350), Vector2(300, 30));
+    // Platform Tambahan Kiri (Dekat atap warung kiri)
+    _addPlatform(
+      Vector2(0, 435), // Sesuaikan koordinat X dan Y-nya
+      Vector2(500, 20), // Lebar 150, Tebal 20 (Sama dengan balkon)
+      isJumpThrough: true,
+      type: PlatformType.extraPlatform,
+    );
 
-    // Platform kiri atas
-    _addPlatform(Vector2(250, 200), Vector2(200, 30));
+    // Platform Tambahan Kanan (Dekat atap warung kanan)
+    _addPlatform(
+      Vector2(848, 435), // Sesuaikan koordinat X dan Y-nya
+      Vector2(438, 20), // Lebar 150, Tebal 20 (Sama dengan balkon)
+      isJumpThrough: true,
+      type: PlatformType.extraPlatform,
+    );
 
-    // Platform kanan atas
-    _addPlatform(Vector2(830, 200), Vector2(200, 30));
+    // Left Balcony
+    _addPlatform(
+      Vector2(0, 250),
+      Vector2(500, 20),
+      isJumpThrough: true,
+      type: PlatformType.balcony,
+    );
+
+    // Right Balcony
+    _addPlatform(
+      Vector2(848, 250),
+      Vector2(438, 20),
+      isJumpThrough: true,
+      type: PlatformType.balcony,
+    );
   }
 
-  void _addPlatform(Vector2 position, Vector2 size) {
-    final platform = PlatformComponent(position: position, size: size);
-    platforms.add(platform);
+  void _addPlatform(
+    Vector2 position,
+    Vector2 size, {
+    bool isJumpThrough = false,
+    int depth = 0,
+    PlatformType type = PlatformType.mainGround,
+  }) {
+    final platform = PlatformComponent(
+      position: position,
+      size: size,
+      isJumpThrough: isJumpThrough,
+      depth: depth,
+      type: type,
+    );
+
+    // Atur prioritas rendering berdasarkan depth
+    if (depth > 0) {
+      platform.priority = -10 - depth; // -11 atau -12 untuk background
+    } else {
+      platform.priority = isJumpThrough ? -1 : 0;
+      platforms.add(platform); // Hanya foreground yang bisa dipijak
+    }
+
     world.add(platform);
   }
 }

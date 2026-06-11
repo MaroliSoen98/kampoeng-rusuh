@@ -710,6 +710,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
       'pekerja_scbd',
       'ibu_daster',
       'ketua_rt',
+      'kurir',
+      'hansip',
     ];
 
     int currentIndex = availableCharacters.indexOf(currentCharacter);
