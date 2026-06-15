@@ -114,10 +114,14 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   snapshot.data!.snapshot.value as Map<dynamic, dynamic>;
               final Map<String, dynamic> data = rawData.cast<String, dynamic>();
 
-              final players = data['players'] != null
-                  ? (data['players'] as Map<dynamic, dynamic>)
-                        .cast<String, dynamic>()
-                  : <String, dynamic>{};
+              // Membaca data players dengan aman (mencegah error dari tipe data List/Map)
+              final playersRaw = data['players'];
+              final playersData = playersRaw is List
+                  ? playersRaw.asMap()
+                  : (playersRaw as Map<dynamic, dynamic>? ?? {});
+              final Map<String, dynamic> players = playersData.map(
+                (key, value) => MapEntry(key.toString(), value),
+              );
 
               final hostName = data['host'] as String? ?? '';
               final isHost = hostName == widget.playerName;
@@ -471,86 +475,74 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                             ),
                                           ),
                                           child: Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
                                             children: [
-                                              Row(
-                                                children: [
-                                                  CircleAvatar(
-                                                    radius: 12,
-                                                    backgroundColor: isMe
-                                                        ? const Color(
-                                                            0xFFFFD166,
-                                                          )
-                                                        : const Color(
-                                                            0xFFE0E0E0,
-                                                          ),
-                                                    child: Icon(
-                                                      Icons.person,
-                                                      size: 16,
+                                              CircleAvatar(
+                                                radius: 12,
+                                                backgroundColor: isMe
+                                                    ? const Color(0xFFFFD166)
+                                                    : const Color(0xFFE0E0E0),
+                                                child: const Icon(
+                                                  Icons.person,
+                                                  size: 16,
+                                                  color: Color(0xFF073B4C),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 16),
+                                              // Expanded dipindahkan langsung ke dalam Row utama agar constraint lebarnya jelas
+                                              Expanded(
+                                                child: Text(
+                                                  pName,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontFamily: 'monospace',
+                                                    color: const Color(
+                                                      0xFF073B4C,
+                                                    ),
+                                                    fontSize: 14,
+                                                    fontWeight: isMe
+                                                        ? FontWeight.w900
+                                                        : FontWeight.normal,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (isMe) ...[
+                                                const SizedBox(width: 12),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(
+                                                      0xFF4A90E2,
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                    border: Border.all(
                                                       color: const Color(
                                                         0xFF073B4C,
                                                       ),
+                                                      width: 2,
                                                     ),
                                                   ),
-                                                  const SizedBox(width: 16),
-                                                  // Expanded agar nama panjang terpotong '...' dan tidak merusak layout
-                                                  Expanded(
-                                                    child: Text(
-                                                      pName,
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                        fontFamily: 'monospace',
-                                                        color: const Color(
-                                                          0xFF073B4C,
-                                                        ),
-                                                        fontSize: 14,
-                                                        fontWeight: isMe
-                                                            ? FontWeight.w900
-                                                            : FontWeight.normal,
-                                                      ),
+                                                  child: const Text(
+                                                    'YOU',
+                                                    style: TextStyle(
+                                                      fontFamily: 'monospace',
+                                                      color: Colors.white,
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w900,
                                                     ),
                                                   ),
-                                                  if (isMe) ...[
-                                                    const SizedBox(width: 12),
-                                                    Container(
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 6,
-                                                            vertical: 2,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: const Color(
-                                                          0xFF4A90E2,
-                                                        ),
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              8,
-                                                            ),
-                                                        border: Border.all(
-                                                          color: const Color(
-                                                            0xFF073B4C,
-                                                          ),
-                                                          width: 2,
-                                                        ),
-                                                      ),
-                                                      child: const Text(
-                                                        'YOU',
-                                                        style: TextStyle(
-                                                          fontFamily:
-                                                              'monospace',
-                                                          color: Colors.white,
-                                                          fontSize: 10,
-                                                          fontWeight:
-                                                              FontWeight.w900,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ],
-                                              ),
+                                                ),
+                                              ],
+                                              const SizedBox(width: 12),
                                               // Badge Status
                                               Container(
                                                 padding:

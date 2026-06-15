@@ -82,7 +82,70 @@ class _GameScreenState extends State<GameScreen> {
           child: CircularProgressIndicator(color: Colors.orangeAccent),
         ),
         overlayBuilderMap: _game.overlayBuilderMap,
-        initialActiveOverlays: const ['TouchControls', 'HUD'],
+        initialActiveOverlays: const ['TouchControls', 'HUD', 'MatchStart'],
+      ),
+    );
+  }
+}
+
+class MatchStartOverlay extends StatelessWidget {
+  final ArenaGame game;
+  const MatchStartOverlay({super.key, required this.game});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withOpacity(0.5), // Latar belakang meredup sedikit
+      child: Center(
+        child: ValueListenableBuilder<String>(
+          valueListenable: game.matchStartTextNotifier,
+          builder: (context, text, child) {
+            return AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return ScaleTransition(
+                  scale: Tween<double>(begin: 0.0, end: 1.0).animate(
+                    CurvedAnimation(
+                      parent: animation,
+                      curve: Curves.elasticOut, // Animasi pop-in memantul
+                    ),
+                  ),
+                  child: FadeTransition(opacity: animation, child: child),
+                );
+              },
+              child: Text(
+                text,
+                key: ValueKey<String>(
+                  text,
+                ), // Kunci penting agar animasi dijalankan per pergantian kata
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  color: text == "FIGHT!"
+                      ? const Color(0xFFEF476F) // Bright Pink untuk FIGHT
+                      : const Color(0xFFFFD166), // Vibrant Yellow
+                  fontSize: text == "READY"
+                      ? 80
+                      : (text == "FIGHT!" ? 120 : 100),
+                  fontWeight: FontWeight.w900,
+                  fontStyle: FontStyle.italic,
+                  letterSpacing: 4.0,
+                  shadows: const [
+                    Shadow(color: Colors.black, offset: Offset(-3, -3)),
+                    Shadow(color: Colors.black, offset: Offset(3, -3)),
+                    Shadow(color: Colors.black, offset: Offset(3, 3)),
+                    Shadow(color: Colors.black, offset: Offset(-3, 3)),
+                    Shadow(
+                      color: Color(0xFF073B4C),
+                      blurRadius: 0,
+                      offset: Offset(8, 8),
+                    ), // 3D cartoon shadow
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }

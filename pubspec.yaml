@@ -63,6 +63,7 @@ flutter:
     - assets/images/stage/bg_rusun_midground.png
     - assets/images/stage/warung_body.png
     - assets/images/stage/asphalt_ground.png
+    - assets/images/stage/balcony_railings_front.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

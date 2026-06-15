@@ -56,6 +56,12 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
       0.15; // Seberapa lambat (0.15 = 15% kecepatan normal)
   double timeScale = 1.0; // Definisi variabel timeScale untuk slow motion
 
+  // --- Variabel untuk Match Start Sequence ---
+  bool isStarting = true;
+  int _startPhase = 0;
+  double _startSequenceTimer = 0.0;
+  final ValueNotifier<String> matchStartTextNotifier = ValueNotifier("READY");
+
   ArenaGame({
     this.roomCode,
     this.localPlayerName,
@@ -80,6 +86,9 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
     },
     'GameOver': (context, game) {
       return GameOverOverlay(game: this);
+    },
+    'MatchStart': (context, game) {
+      return MatchStartOverlay(game: this);
     },
   };
 
@@ -115,6 +124,9 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
       final bgRusunSprite = await loadSprite('stage/bg_rusun_midground.png');
       final warungBodySprite = await loadSprite('stage/warung_body.png');
       final asphaltGroundSprite = await loadSprite('stage/asphalt_ground.png');
+      final balconyRailingSprite = await loadSprite(
+        'stage/balcony_railings_front.png',
+      );
 
       // --- 2. ADD BACKGROUND LAYER ---
       world.add(
@@ -152,6 +164,54 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
           priority: -2, // Di depan warung (-5) tapi di belakang pemain (0)
         ),
       );
+
+      // --- 5. ADD FOREGROUND BALCONY RAILING LAYER ---
+      // Kalikan srcSize dengan angka skala agar membesar proporsional
+      final double railingScale =
+          0.3; // Diperkecil 5x lipat dari 2.0. Ganti angka ini jika masih kurang pas (misal 0.3 atau 0.5)
+      final Vector2 balconyRailingSize =
+          balconyRailingSprite.srcSize * railingScale;
+      final int balconyRailingPriority =
+          20; // 20 berarti di depan player (0) & efek partikel (15)
+
+      // Fungsi helper untuk menggambar pagar secara otomatis (Tiling & Cropping)
+      void drawRailing(double startX, double startY, double totalWidth) {
+        for (double x = 0; x < totalWidth; x += balconyRailingSize.x) {
+          double remainingWidth = totalWidth - x;
+          double ratio = remainingWidth < balconyRailingSize.x
+              ? remainingWidth / balconyRailingSize.x
+              : 1.0;
+
+          Sprite currentSprite = balconyRailingSprite;
+
+          // Jika sisa panjang lebih kecil dari gambar asli, potong (crop) gambarnya
+          if (ratio < 1.0) {
+            currentSprite = Sprite(
+              balconyRailingSprite.image,
+              srcPosition: balconyRailingSprite.srcPosition,
+              srcSize: Vector2(
+                balconyRailingSprite.srcSize.x * ratio,
+                balconyRailingSprite.srcSize.y,
+              ),
+            );
+          }
+
+          world.add(
+            StageVisualLayer(
+              sprite: currentSprite,
+              position: Vector2(startX + x, startY),
+              size: Vector2(balconyRailingSize.x * ratio, balconyRailingSize.y),
+              priority: balconyRailingPriority, // Render di paling depan
+            ),
+          );
+        }
+      }
+
+      // Terapkan ke semua lantai secara otomatis!
+      drawRailing(0, 210, 500); // Kiri Atas (Lantai 2) sepanjang 500px
+      drawRailing(0, 405, 500); // Kiri Bawah (Lantai 1) sepanjang 500px
+      drawRailing(848, 210, 438); // Kanan Atas (Lantai 2) sepanjang 438px
+      drawRailing(848, 405, 438); // Kanan Bawah (Lantai 1) sepanjang 438px
       // -----------------------------------
 
       // Menambahkan platform (colliders)
@@ -388,6 +448,34 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
 
   @override
   void update(double dt) {
+    // --- Match Start Sequence ---
+    if (_startPhase < 5) {
+      _startSequenceTimer += dt;
+      if (_startPhase == 0 && _startSequenceTimer >= 1.5) {
+        // Durasi tulisan READY
+        _startPhase = 1;
+        matchStartTextNotifier.value = "3";
+        _startSequenceTimer = 0;
+      } else if (_startPhase == 1 && _startSequenceTimer >= 0.8) {
+        _startPhase = 2;
+        matchStartTextNotifier.value = "2";
+        _startSequenceTimer = 0;
+      } else if (_startPhase == 2 && _startSequenceTimer >= 0.8) {
+        _startPhase = 3;
+        matchStartTextNotifier.value = "1";
+        _startSequenceTimer = 0;
+      } else if (_startPhase == 3 && _startSequenceTimer >= 0.8) {
+        _startPhase = 4;
+        matchStartTextNotifier.value = "FIGHT!";
+        isStarting = false; // Kunci kontrol input pemain dibuka di sini
+        _startSequenceTimer = 0;
+      } else if (_startPhase == 4 && _startSequenceTimer >= 1.0) {
+        // Durasi tulisan FIGHT
+        _startPhase = 5;
+        overlays.remove('MatchStart'); // Hilangkan overlay
+      }
+    }
+
     // --- Logika Slow Motion ---
     // Harus dijalankan di awal agar dt untuk semua child ter-update dengan benar
     if (_slowMoTimer > 0) {
@@ -479,7 +567,7 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
 
     p1GrabCooldownNotifier.value = player1?.grabCooldownTimer ?? 0.0;
 
-    if (!isGameOver) {
+    if (!isGameOver && !isStarting) {
       if (playerNames.isNotEmpty && matchTimer > 0) {
         matchTimer -= dt;
         if (matchTimer <= 0) {
@@ -553,7 +641,12 @@ class ArenaGame extends FlameGame with HasKeyboardHandlerComponents {
 
   void retry() {
     isGameOver = false;
+    isStarting = true;
+    _startPhase = 0;
+    _startSequenceTimer = 0.0;
+    matchStartTextNotifier.value = "READY";
     overlays.remove('GameOver');
+    overlays.add('MatchStart');
     playerLivesNotifier.value = List.filled(playerNames.length, 3);
     playerDamageNotifier.value = List.filled(playerNames.length, 0.0);
     playerRespawnNotifier.value = List.filled(playerNames.length, 0);

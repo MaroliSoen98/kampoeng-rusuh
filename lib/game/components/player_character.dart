@@ -60,6 +60,8 @@ class PlayerCharacter extends PositionComponent
   String? grabbedByLabel;
   Vector2? targetNetworkPosition;
 
+  double _hitFlashTimer = 0.0; // Timer untuk efek flash saat terkena pukulan
+
   late TextPainter _textPainter;
 
   SpriteSheet? _punchSheet; // Simpan Sheet-nya saja, bukan animasinya!
@@ -167,6 +169,8 @@ class PlayerCharacter extends PositionComponent
   // Fungsi Menerima Pukulan Eksternal (Online)
   void receiveHit(num vx, num vy, num stun, {num? damageAdded}) {
     if (isDead || isRespawning) return;
+
+    _hitFlashTimer = 0.15; // Trigger efek flash putih selama 150ms
     if (damageAdded != null) {
       damagePercentage += damageAdded.toDouble();
       updateDamageUI();
@@ -208,6 +212,9 @@ class PlayerCharacter extends PositionComponent
     } else if (action == 'thrown' || action == 'released') {
       isGrabbed = false;
       grabbedByLabel = null;
+
+      if (action == 'thrown')
+        _hitFlashTimer = 0.15; // Trigger efek flash saat dibanting
       if (damageAdded != null) {
         damagePercentage += damageAdded.toDouble();
         updateDamageUI();
@@ -423,6 +430,18 @@ class PlayerCharacter extends PositionComponent
 
   @override
   void update(double dt) {
+    // Kunci semua input saat match belum mulai (Pre-match state)
+    if (gameRef.isStarting) {
+      _wantsToJump = false;
+      _wantsToGrab = false;
+      _wantsToPunch = false;
+      _isDownPressed = false;
+      _currentDirection = MoveDirection.idle;
+      _leftTapTimer = 0.0;
+      _rightTapTimer = 0.0;
+      dashTimer = 0.0;
+    }
+
     super.update(dt);
 
     // Kurangi Timer Input dan Dash
@@ -430,6 +449,12 @@ class PlayerCharacter extends PositionComponent
     if (_rightTapTimer > 0) _rightTapTimer -= dt;
     if (dashCooldownTimer > 0) dashCooldownTimer -= dt;
     if (dashTimer > 0) dashTimer -= dt;
+
+    // Kurangi Timer Flash Hit (Menggunakan waktu asli / unscaled agar tidak melambat saat slowmo)
+    if (_hitFlashTimer > 0) {
+      final unscaledDt = gameRef.timeScale > 0 ? dt / gameRef.timeScale : dt;
+      _hitFlashTimer -= unscaledDt;
+    }
 
     // ===== UPDATE SMOKE PARTICLES =====
     _lastPosForSmoke ??= position.clone();
@@ -670,6 +695,8 @@ class PlayerCharacter extends PositionComponent
         double pummelDamage = 2.5; // Damage kecil setiap pukulan
         grabbedCharacter!.damagePercentage += pummelDamage;
         grabbedCharacter!.updateDamageUI();
+        grabbedCharacter!._hitFlashTimer =
+            0.15; // Trigger flash putih saat di-pummel
 
         // Hitstop ringan & Getaran Kamera
         hitstopTimer = 0.05;
@@ -703,6 +730,8 @@ class PlayerCharacter extends PositionComponent
             (Random().nextDouble() * 3.5); // Acak sekitar 12.0% hingga 15.5%
         grabbedCharacter!.damagePercentage += damageToAdd;
         grabbedCharacter!.updateDamageUI();
+        grabbedCharacter!._hitFlashTimer =
+            0.15; // Trigger flash putih saat dilempar
 
         double knockbackMultiplier =
             (1.0 + (grabbedCharacter!.damagePercentage / 50.0)) *
@@ -926,6 +955,8 @@ class PlayerCharacter extends PositionComponent
             }
 
             other.stunTimer = calculatedStun;
+            other._hitFlashTimer =
+                0.15; // Trigger flash putih untuk lokal (Offline/Tuan rumah)
 
             // Terapkan Hitstop (Layar ter-pause sesaat)
             double currentHitstop = isHomeRun
@@ -1244,8 +1275,16 @@ class PlayerCharacter extends PositionComponent
 
       Paint? tintPaint; // Secara default tidak mewarnai Sprite
 
+      // Efek Visual Kena Pukul (Prioritas tertinggi, menimpa efek Rage)
+      if (_hitFlashTimer > 0) {
+        tintPaint = Paint()
+          ..colorFilter = ColorFilter.mode(
+            Colors.white.withOpacity(0.8), // Flash putih cerah khas brawler
+            BlendMode.srcATop,
+          );
+      }
       // Efek Visual RAGE (Berkedip merah menyala saat damage pemain >= 35%)
-      if (damagePercentage >= 35.0) {
+      else if (damagePercentage >= 35.0) {
         double maxRageOpacity =
             ((damagePercentage - 35.0) / 115.0).clamp(0.0, 1.0) *
             0.6; // Maksimal 60% merah
